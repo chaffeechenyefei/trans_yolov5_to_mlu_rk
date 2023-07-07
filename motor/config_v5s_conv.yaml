@@ -1,0 +1,17 @@
+finetune_weights: /mnt/projects/ObjectDetection/weights/yolo_weights/Motor_v5s_conv/weights/best.pt
+
+project: /mnt/projects/ObjectDetection/weights/yolo_weights
+name: Motor_v5s_conv
+
+cfg: models/yolov5s_conv.yaml
+data: motor/Motor.yaml
+hyp: motor/hyp.finetune.yaml
+epochs: 200
+batch_size: 128
+img_size: [736, 416]
+device: '0'
+test_task: val
+workers: 16
+
+conf_thresh: 0.2
+iou_thresh: 0.4

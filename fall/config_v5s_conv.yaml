@@ -1,0 +1,17 @@
+finetune_weights: /mnt/ActionRecog/weights/yolo_weights/ORIG/yolov5s.pt
+
+project: /mnt/projects/ObjectDetection/weights/yolo_weights
+name: Fallv2_v5s_conv
+
+cfg: models/yolov5s_conv.yaml
+data: fall/Fallv2.yaml
+hyp: fall/hyp.finetune.yaml
+epochs: 700
+batch_size: 128
+img_size: [736, 416]
+device: '0'
+test_task: val
+workers: 16
+
+conf_thresh: 0.2
+iou_thresh: 0.4

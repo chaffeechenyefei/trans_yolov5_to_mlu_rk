@@ -1,0 +1,6 @@
+train: /data/dataset/yolo_dataset/people_detection/coco_people/coco_people_wework_fmt_train.txt
+val: /data/dataset/yolo_dataset/people_detection/coco_people/coco_people_wework_fmt_val.txt
+
+# number of classes
+nc: 1
+names: [ 'people' ]

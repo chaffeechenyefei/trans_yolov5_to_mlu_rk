@@ -1,0 +1,17 @@
+finetune_weights: ''
+
+project: /mnt/projects/ObjectDetection/weights/yolo_weights
+name: MovingObject_v5s_conv
+
+cfg: models/yolov5s_conv.yaml
+data: moving_object/MovingObjectv2_ch3.yaml
+hyp: moving_object/hyp.scratchv2.yaml
+epochs: 200
+batch_size: 256
+img_size: [736, 416]
+device: '0'
+test_task: test
+workers: 16
+
+conf_thresh: 0.4
+iou_thresh: 0.4

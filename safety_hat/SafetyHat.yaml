@@ -1,0 +1,5 @@
+train: /data/dataset/yolo_dataset/SafetyHat/train.txt  # 118287 images
+val: /data/dataset/yolo_dataset/SafetyHat/val.txt  # 5000 images
+
+nc: 2
+names: [ 'hat', 'head' ]

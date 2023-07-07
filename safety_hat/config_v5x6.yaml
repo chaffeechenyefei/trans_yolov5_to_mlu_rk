@@ -1,0 +1,17 @@
+finetune_weights: /mnt/ActionRecog/weights/yolo_weights/ORIG/yolov5x6.pt
+
+project: /mnt/projects/ObjectDetection/weights/yolo_weights
+name: SafetyHat_v5x6
+
+cfg: ''
+data: safety_hat/SafetyHat.yaml
+hyp: data/hyp.finetune.yaml
+epochs: 200
+batch_size: 16
+img_size: [1280, 1280]
+device: '0'
+test_task: val
+workers: 16
+
+conf_thresh: 0.2
+iou_thresh: 0.4

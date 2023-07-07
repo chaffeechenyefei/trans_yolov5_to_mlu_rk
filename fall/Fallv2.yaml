@@ -1,0 +1,5 @@
+train: /data/dataset/yolo_dataset/Fallv2/train.txt
+val: /data/dataset/yolo_dataset/Fallv2/val.txt
+
+nc: 2
+names: ['completely', 'no-completely']

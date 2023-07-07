@@ -1,0 +1,6 @@
+train: /data/dataset/yolo_dataset/CycleKaggle/train.txt  # 118287 images
+val: /data/dataset/yolo_dataset/CycleKaggle/val.txt  # 5000 images
+nc: 2
+
+# class names[2, 5, 7]
+names: [ 'motor', 'bike' ]

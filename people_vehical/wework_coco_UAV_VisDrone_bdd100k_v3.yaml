@@ -1,0 +1,6 @@
+train: /data/dataset/yolo_dataset/people_vehical_detection/train_Cycle_Voc_WiderPersonv2_More.txt.txt  # 130270 images
+val: /data/dataset/yolo_dataset/people_vehical_detection/val_Cycle_Voc_WiderPersonv2_More.txt  # 24631 images
+
+# number of classes
+nc: 9
+names: [ 'people', 'bicycle', 'car', 'van', 'truck', 'tricycle', 'awning-tricycle', 'bus', 'motor' ]

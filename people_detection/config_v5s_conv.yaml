@@ -1,0 +1,17 @@
+finetune_weights: /mnt/projects/ObjectDetection/weights/yolo_weights/people_detection_v5s_conv/weights/best.pt
+
+project: /mnt/projects/ObjectDetection/weights/yolo_weights
+name: 'people_detection_v5s_conv'
+
+cfg: models/yolov5s_conv.yaml
+data: people_detection/wework_coco_v2.yaml
+hyp: people_detection/hyp.finetune_v2.yaml
+epochs: 200
+batch_size: 64
+img_size: [736, 416]
+device: '0'
+test_task: val
+workers: 16
+
+conf_thresh: 0.2
+iou_thresh: 0.4

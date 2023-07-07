@@ -1,0 +1,6 @@
+train: /data/dataset/yolo_dataset/MOT_Head/head_cocobg_safetyhat_train.txt  # 16376 images
+val: /data/dataset/yolo_dataset/MOT_Head/head_cocobg_safetyhat_val.txt  # 2946images
+
+nc: 1
+
+names: ['head' ]

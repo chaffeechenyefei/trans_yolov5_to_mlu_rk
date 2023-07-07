@@ -1,0 +1,9 @@
+
+train: /mnt/ActionRecog/dataset/DETRAC_coco/train.txt  # 82085 images
+val: /mnt/ActionRecog/dataset/DETRAC_coco/val.txt  # 5000 images
+test: /mnt/ActionRecog/dataset/DETRAC_coco/test.txt  # 5000 images
+# number of classes
+nc: 1
+# class names
+#names: ['car', 'van', 'others', 'bus']
+names: ['car']

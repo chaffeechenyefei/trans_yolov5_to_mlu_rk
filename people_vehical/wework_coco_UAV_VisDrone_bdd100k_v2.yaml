@@ -1,0 +1,6 @@
+train: /data/dataset/yolo_dataset/people_vehical_detection/wework_cocopeople_UAV_VisDrone_bdd100k/train_Cycle_Voc_WiderPersonv2.txt  # 118238 images
+val: /data/dataset/yolo_dataset/people_vehical_detection/wework_cocopeople_UAV_VisDrone_bdd100k/val_Cycle_Voc_WiderPersonv2.txt  # 22602 images 22522 labels
+
+# number of classes
+nc: 9
+names: [ 'people', 'bicycle', 'car', 'van', 'truck', 'tricycle', 'awning-tricycle', 'bus', 'motor' ]

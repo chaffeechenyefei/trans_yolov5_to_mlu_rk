@@ -1,0 +1,7 @@
+train: /data/dataset/yolo_dataset/MovingObjectv2_ch3/train.txt  # 245566 images
+val: /data/dataset/yolo_dataset/MovingObjectv2_ch3/val.txt  # 4091 images
+test: /data/dataset/yolo_dataset/MovingObjectv2_ch3/test.txt  # 1151 images
+
+nc: 1
+
+names: [ 'object' ]

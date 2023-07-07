@@ -1,0 +1,5 @@
+#train: /data/dataset/yolo_dataset/Fall/train_A_ppfall_video_google.txt
+#val: /data/dataset/yolo_dataset/Fall/val.txt
+
+nc: 1
+names: [ 'fall' ]

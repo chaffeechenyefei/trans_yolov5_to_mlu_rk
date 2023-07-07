@@ -1,0 +1,17 @@
+finetune_weights: /mnt/projects/ObjectDetection/weights/yolo_weights/wework_coco_v3_tiny/weights/best.pt
+
+project: /mnt/projects/ObjectDetection/weights/yolo_weights
+name: 'wework_coco_v3_tiny'
+
+cfg: 'models/hub/yolov3-tiny.yaml'
+data: people_detection/wework_coco.yaml
+hyp: data/hyp.scratch.yaml
+epochs: 50
+batch_size: 64
+img_size: [736, 416]
+device: '0'
+test_task: val
+workers: 16
+
+conf_thresh: 0.2
+iou_thresh: 0.4

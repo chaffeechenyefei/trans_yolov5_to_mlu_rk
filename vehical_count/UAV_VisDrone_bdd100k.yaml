@@ -1,0 +1,6 @@
+train: /data/dataset/yolo_dataset/UAV/UAV_VisDrone_bdd100k_train.txt  # 118287 images
+val: /data/dataset/yolo_dataset/UAV/UAV_VisDrone_bdd100k_val.txt  # 5000 images
+
+# number of classes
+nc: 9
+names: [ 'people', 'bicycle', 'car', 'van', 'truck', 'tricycle', 'awning-tricycle', 'bus', 'motor' ]
