@@ -4,6 +4,11 @@
 
 推理: python3.8 detect.py --weights /path/weights.pt --source /path/imgs_dir --save_dir /path/save_dir --img_size 736 416 --conf_thres 0.2 --iou_thres 0.3
 
+```shell
+python detect.py --weights weights/yolov5s-conv-head-20220121.pt --source data/images --save_dir data/result --img_size 736 416 --conf_thres 0.2 --iou_thres 0.3 --device cpu
+python detect.py --weights weights/yolov5s-people.pt --source data/images --save_dir data/result --img_size 736 416 --conf_thres 0.2 --iou_thres 0.3 --device cpu
+```
+
 
 # I. RKNN量化
 ## 项目页面
