@@ -58,14 +58,14 @@ class Detect(nn.Module):
         # x = x.copy()  # for profiling
         z = []  # inference output
         self.training |= self.export
-        print('--> Detect Layer:', self.training, self.export, self.export_mode )
+        # print('--> Detect Layer:', self.training, self.export, self.export_mode )
         if self.export:
             """
             针对rknn输出的特殊处理
             """
-            print('stride = ', self.stride)
+            # print('stride = ', self.stride)
             if self.export_mode == 0:
-                print('--> export rknn mode 0')
+                # print('--> export rknn mode 0')
                 xys = []
                 whs = []
                 confs = []
@@ -100,7 +100,7 @@ class Detect(nn.Module):
                 # return [xywhs,confs]
                 return [xys,whs,confs]
             elif self.export_mode == 1:
-                print('--> export rknn mode 1')
+                # print('--> export rknn mode 1')
                 xys = []
                 whs = []
                 confs = []
@@ -190,7 +190,7 @@ class Detect(nn.Module):
                     output.append(y.view(bs, -1, self.no))
                 return torch.cat(output, 1)
 
-        print('--> normal')
+        # print('--> normal')
         for i in range(self.nl):
             x[i] = self.m[i](x[i])  # conv
             # print(x[i].shape)
@@ -210,8 +210,8 @@ class Detect(nn.Module):
                 y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 z.append(y.view(bs, -1, self.no))
-        print('<-- normal')
-        print('<-- Detect Layer:', self.training, self.export)
+        # print('<-- normal')
+        # print('<-- Detect Layer:', self.training, self.export)
         return x if self.training else (torch.cat(z, 1), x)
 
     @staticmethod

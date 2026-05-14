@@ -24,7 +24,7 @@ def detect(save_img=True, save_num=False, save_txt=False, save_conf=False, plot_
     half = device.type != 'cpu'
     model = attempt_load(weights, map_location=device)  # load FP32 model
     stride = int(model.stride.max())  # model stride
-    print('stride = ', stride)
+    # print('stride = ', stride)
     # imgsz = check_img_size(imgsz, s=stride)  # check img_size
     if half:
         model.half()  # to FP16

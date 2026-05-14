@@ -4,3 +4,4 @@
 weights/*.pt
 __pycache__/
 data/result/
+data/videos/
