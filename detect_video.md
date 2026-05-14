@@ -25,6 +25,7 @@ python detect.py --weights weights/yolov5s-conv-head-20220121.pt --source data/i
 - 检测时可以显示实时fps
 - 不要改动项目中其他代码, 可以新建代码, 出发点是保证兼容性
 - 在命令行显示剩余video中尚未处理的frame的百分比, 或者已处理的frame的百分比
+- [modified] 已增加减小结果文件体积的方案: 支持 `--codec` 编码器选择(默认 `auto`, 自动回退 `avc1/H264/mp4v/XVID`)；支持 `--output_scale` 输出分辨率缩放(如 `0.75` / `0.5`)。两者可叠加使用以进一步减小文件。
 
 # CLI
 ```shell
@@ -32,9 +33,11 @@ python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source 
 ```
 
 ```shell
-python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-002.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25
+python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-001.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75
 
-python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-003.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25
+python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-002.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75
 
-python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-004.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25
+python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-003.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75
+
+python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-004.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75
 ```

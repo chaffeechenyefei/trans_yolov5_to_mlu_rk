@@ -15,6 +15,27 @@ from utils.plots import plot_one_box
 from utils.torch_utils import select_device
 
 
+def _make_even(v):
+    return max((int(v) // 2) * 2, 2)
+
+
+def _create_video_writer(save_path, fps, width, height, codec):
+    # 编码器自动回退，优先高压缩编码以减小文件体积 / Auto-fallback codecs, prioritize high-compression encoders for smaller files
+    if str(codec).lower() == 'auto':
+        codec_candidates = ['avc1', 'H264', 'mp4v', 'XVID']
+    else:
+        codec_candidates = [codec]
+
+    for c in codec_candidates:
+        writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*c), fps, (width, height))
+        if writer.isOpened():
+            # 返回最终命中的编码器和候选列表 / Return final matched codec and candidate list
+            return writer, c, codec_candidates
+        writer.release()
+
+    return None, None, codec_candidates
+
+
 def _parse_img_size(img_size, stride):
     if isinstance(img_size, int):
         s = check_img_size(img_size, s=stride)
@@ -80,13 +101,26 @@ def detect_video():
     out_fps = src_fps / frame_interval
     sampled_total_frames = int(math.ceil(total_frames / frame_interval)) if total_frames > 0 else 0
 
+    # 输出缩放可显著降低码率和文件体积 / Output scaling can significantly reduce bitrate and file size
+    output_scale = max(float(opt.output_scale), 0.05)
+    out_width = _make_even(width * output_scale)
+    out_height = _make_even(height * output_scale)
+
     video_name = os.path.splitext(os.path.basename(source))[0]
     save_path = os.path.join(save_dir, f'{video_name}_detect.mp4')
-    writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), out_fps, (width, height))
+    writer, chosen_codec, codec_candidates = _create_video_writer(save_path, out_fps, out_width, out_height, opt.codec)
 
-    if not writer.isOpened():
+    if writer is None:
         cap.release()
         raise RuntimeError(f'Cannot open video writer: {save_path}')
+
+    # 明确输出用户请求编码器与实际编码器，便于定位是否发生回退 / Print requested and actual codec to confirm fallback behavior
+    fallback_tag = ' (fallback applied)' if str(opt.codec).lower() == 'auto' and chosen_codec != codec_candidates[0] else ''
+    print(
+        f'Requested codec: {opt.codec} | Selected codec: {chosen_codec}{fallback_tag} '
+        f'| Tried: {" -> ".join(codec_candidates)}'
+    )
+    print(f'Video writer output: {out_width}x{out_height} @ {out_fps:.2f} fps')
 
     frame_idx = 0
     processed = 0
@@ -135,7 +169,12 @@ def detect_video():
                     cv2.LINE_AA,
                 )
 
-                writer.write(im0)
+                if out_width != width or out_height != height:
+                    out_frame = cv2.resize(im0, (out_width, out_height), interpolation=cv2.INTER_AREA)
+                else:
+                    out_frame = im0
+
+                writer.write(out_frame)
                 processed += 1
 
                 elapsed = max(time.time() - start_time, 1e-6)
@@ -172,6 +211,8 @@ def detect_video():
         f'\nDone. Output saved to: {save_path}. '
         f'Processed {processed} frames in {total_elapsed:.2f}s.{final_progress_info}'
     )
+    # 结束再次输出最终编码器，避免中途日志被覆盖 / Print selected codec again at end in case progress logs overwrite earlier output
+    print(f'Final selected codec: {chosen_codec}')
 
 
 if __name__ == '__main__':
@@ -184,6 +225,8 @@ if __name__ == '__main__':
     parser.add_argument('--iou_thres', type=float, default=0.3)
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--sample_fps', type=float, default=1.0, help='Sample frame rate for detection')
+    parser.add_argument('--codec', type=str, default='auto', help='Video codec: auto/avc1/H264/mp4v/XVID')
+    parser.add_argument('--output_scale', type=float, default=1.0, help='Output resolution scale (0-1 to reduce file size)')
 
     opt = parser.parse_args()
     detect_video()
