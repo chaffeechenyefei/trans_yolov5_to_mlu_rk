@@ -27,13 +27,49 @@ python detect.py --weights weights/yolov5s-conv-head-20220121.pt --source data/i
 - 在命令行显示剩余video中尚未处理的frame的百分比, 或者已处理的frame的百分比
 - [modified] 已增加减小结果文件体积的方案: 支持 `--codec` 编码器选择(默认 `auto`, 自动回退 `avc1/H264/mp4v/XVID`)；支持 `--output_scale` 输出分辨率缩放(如 `0.75` / `0.5`)。两者可叠加使用以进一步减小文件。
 
+## Incremental Requirement
+较大改动会在这里, 每个section可以理解为一个较大的需求
+
+### [modified] HeatMap
+- 已支持可选热力图输出: 通过 `--enable_heatmap` 开启。未开启时保持原有行为不变(仅输出检测结果视频)。
+- 热力图由每帧多个bbox累计得到: bbox区域按置信度累加，位置重叠越多/置信度越高，颜色越红。
+- 已支持时间衰减: 通过 `--heat_decay_seconds` 控制衰减窗口，默认 `60` 秒；超过窗口的历史贡献权重为0。
+- 已支持叠加透明度: 通过 `--heatmap_alpha` 控制热力图与原视频alpha叠放强度，默认 `0.35`。
+
+
 # CLI
+- 第一次测试
 ```shell
 python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-001.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 1
 ```
 
+- 编解码压缩输出
+
+head detection
 ```shell
 python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-001.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75
+
+python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-002.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75
+
+python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-003.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75
+
+python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-004.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75
+```
+
+people detection
+```shell
+python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/rtmart-001.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75
+
+python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/rtmart-002.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75
+
+# HeatMap(60秒衰减 + alpha叠加)
+python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/rtmart-002.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75 --enable_heatmap --heat_decay_seconds 60 --heatmap_alpha 0.35
+```
+
+
+head detection + heatmap
+```shell
+python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-001.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75 --enable_heatmap
 
 python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-002.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75
 

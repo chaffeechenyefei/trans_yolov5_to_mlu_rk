@@ -10,6 +10,9 @@ python detect.py --weights weights/yolov5s-people.pt --source data/images --save
 
 # 视频检测与结果视频保存(可减小结果体积)
 python detect_video.py --weights weights/yolov5s-conv-head-20220121.pt --source data/videos/rtmart-001.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 1 --codec auto --output_scale 0.75
+
+# 视频检测 + 热力图叠加(60秒时间衰减)
+python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/rtmart-002.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --codec auto --output_scale 0.75 --enable_heatmap --heat_decay_seconds 60 --heatmap_alpha 0.35
 ```
 
 

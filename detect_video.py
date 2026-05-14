@@ -3,6 +3,7 @@ import os
 import time
 import random
 import math
+from collections import deque
 
 import cv2
 import numpy as np
@@ -63,6 +64,61 @@ def _preprocess_frame(im0, imgsz, stride, device, half):
     return img
 
 
+def _build_frame_heatmap(shape_hw, det):
+    # 将当前帧bbox转换成热度图贡献，数量与置信度越高热度越高 / Convert current-frame bboxes to heat contribution map; more boxes and higher confidence produce stronger heat
+    h, w = shape_hw
+    frame_heat = np.zeros((h, w), dtype=np.float32)
+    if det is None or not len(det):
+        return frame_heat
+
+    for *xyxy, conf, _cls in det:
+        x1 = max(int(xyxy[0]), 0)
+        y1 = max(int(xyxy[1]), 0)
+        x2 = min(int(xyxy[2]), w - 1)
+        y2 = min(int(xyxy[3]), h - 1)
+        if x2 <= x1 or y2 <= y1:
+            continue
+        frame_heat[y1:y2 + 1, x1:x2 + 1] += float(conf)
+
+    return frame_heat
+
+
+def _update_temporal_heatmap(frame_heat, current_sec, second_bins, heat_sum, heat_time_sum, decay_seconds):
+    # 以“秒”为粒度累计热度并维护窗口，降低内存占用 / Aggregate heat per second and keep a sliding window to reduce memory usage
+    current_bin_sec = int(current_sec)
+    if second_bins and second_bins[-1][0] == current_bin_sec:
+        # second_bins元素是tuple，不能重绑元素，但可原地更新其中ndarray / tuple items are immutable, but inner ndarray can be updated in-place
+        second_bins[-1][1][:] += frame_heat
+    else:
+        second_bins.append((current_bin_sec, frame_heat.copy()))
+
+    heat_sum += frame_heat
+    heat_time_sum += frame_heat * current_bin_sec
+
+    # 清理超过衰减窗口的历史数据，60s前权重为0 / Drop stale history outside decay window where weight should be zero
+    while second_bins and (current_sec - second_bins[0][0]) > decay_seconds:
+        sec_old, heat_old = second_bins.popleft()
+        heat_sum -= heat_old
+        heat_time_sum -= heat_old * sec_old
+
+    # 线性时间衰减: weight=max(0,1-age/decay_seconds) / Linear temporal decay: weight=max(0,1-age/decay_seconds)
+    weighted_heat = heat_sum * (1.0 - current_sec / decay_seconds) + heat_time_sum / decay_seconds
+    np.maximum(weighted_heat, 0.0, out=weighted_heat)
+    return weighted_heat
+
+
+def _overlay_heatmap(im0, weighted_heat, alpha):
+    # 将加权热力图映射成伪彩色并与原图alpha叠加 / Convert weighted heatmap to color map and alpha-blend with original frame
+    heat_max = float(weighted_heat.max())
+    if heat_max <= 1e-6:
+        return im0
+
+    heat_norm = np.clip(weighted_heat / heat_max, 0.0, 1.0)
+    heat_u8 = (heat_norm * 255.0).astype(np.uint8)
+    heat_color = cv2.applyColorMap(heat_u8, cv2.COLORMAP_JET)
+    return cv2.addWeighted(im0, 1.0 - alpha, heat_color, alpha, 0.0)
+
+
 def detect_video():
     source = opt.source
     save_dir = opt.save_dir
@@ -121,11 +177,23 @@ def detect_video():
         f'| Tried: {" -> ".join(codec_candidates)}'
     )
     print(f'Video writer output: {out_width}x{out_height} @ {out_fps:.2f} fps')
+    heatmap_alpha = min(max(float(opt.heatmap_alpha), 0.0), 1.0)
+    if opt.enable_heatmap:
+        # 输出热力图参数，便于回溯实验配置 / Print heatmap settings for reproducible experiments
+        print(
+            f'HeatMap enabled: decay={max(float(opt.heat_decay_seconds), 1.0):.1f}s, '
+            f'alpha={heatmap_alpha:.2f}'
+        )
 
     frame_idx = 0
     processed = 0
     infer_fps_ema = None
     start_time = time.time()
+
+    second_bins = deque()
+    # 分别维护Σheat与Σ(heat*time)，用于O(1)计算衰减热力图 / Keep Σheat and Σ(heat*time) for O(1) temporal decay computation
+    heat_sum = np.zeros((height, width), dtype=np.float32)
+    heat_time_sum = np.zeros((height, width), dtype=np.float32)
 
     try:
         with torch.no_grad():
@@ -150,6 +218,20 @@ def detect_video():
                         c = int(cls)
                         label = f'{names[c]} {conf:.2f}'
                         plot_one_box(xyxy, im0, label=label, color=colors[c], line_thickness=2)
+
+                if opt.enable_heatmap:
+                    # 使用视频时间而不是墙钟时间，确保离线处理与实时播放权重一致 / Use video timeline instead of wall-clock time for stable offline/online behavior
+                    current_sec = frame_idx / src_fps
+                    frame_heat = _build_frame_heatmap((height, width), pred)
+                    weighted_heat = _update_temporal_heatmap(
+                        frame_heat=frame_heat,
+                        current_sec=current_sec,
+                        second_bins=second_bins,
+                        heat_sum=heat_sum,
+                        heat_time_sum=heat_time_sum,
+                        decay_seconds=max(float(opt.heat_decay_seconds), 1.0),
+                    )
+                    im0 = _overlay_heatmap(im0, weighted_heat, alpha=heatmap_alpha)
 
                 infer_time = max(time.time() - t0, 1e-6)
                 infer_fps = 1.0 / infer_time
@@ -227,6 +309,9 @@ if __name__ == '__main__':
     parser.add_argument('--sample_fps', type=float, default=1.0, help='Sample frame rate for detection')
     parser.add_argument('--codec', type=str, default='auto', help='Video codec: auto/avc1/H264/mp4v/XVID')
     parser.add_argument('--output_scale', type=float, default=1.0, help='Output resolution scale (0-1 to reduce file size)')
+    parser.add_argument('--enable_heatmap', action='store_true', help='Overlay weighted heatmap on output video')
+    parser.add_argument('--heat_decay_seconds', type=float, default=60.0, help='Heatmap decay window in seconds')
+    parser.add_argument('--heatmap_alpha', type=float, default=0.35, help='Heatmap overlay alpha in [0, 1]')
 
     opt = parser.parse_args()
     detect_video()
