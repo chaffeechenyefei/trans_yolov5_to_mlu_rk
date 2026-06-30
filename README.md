@@ -17,7 +17,11 @@ python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/
 # 仅输出 bbox 文本文件(frame_id, cls_id, x, y, w, h, conf), 跳过视频写入
 python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/rtmart-001.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --bbox_output
 
+# 归一化 bbox 输出 (x,y,w,h 全部除以原帧 W/H 到 [0,1]), 文件携带 `# normalized: true` header
+python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/rtmart-001.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --bbox_output --bbox_normalized
+
 # 将 bbox 文本与原视频合成带 bbox 的视频(无需模型权重, 纯 OpenCV)
+# 合成器会自动识别 bbox 文件 header 的归一化标志; 如 header 缺失可手工 --bbox_normalized true|false 覆盖
 python bbox_video_synth.py --source data/videos/rtmart-001.mp4 --save_dir data/result --sample_fps 25 --codec auto --output_scale 0.75 --names head
 ```
 

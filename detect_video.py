@@ -167,13 +167,16 @@ def detect_video():
 
     # bbox-only模式: 仅写bbox文本文件, 跳过视频写入以提升吞吐 / bbox-only mode: write bbox text file only, skip video writing for higher throughput
     bbox_only = bool(opt.bbox_output)
+    # 归一化标志: 为True时输出 x/w/y/h 都按原帧尺度除到 [0,1] / Normalization flag: when True, x/w/y/h are divided by original frame size to [0,1]
+    bbox_normalized = bool(opt.bbox_normalized)
     bbox_path = os.path.join(save_dir, f'{video_name}_bbox.txt') if bbox_only else None
     # 文本写入句柄在finally中统一关闭 / File handle is closed in finally block
     bbox_fp = open(bbox_path, 'w', encoding='utf-8') if bbox_only else None
     if bbox_only:
-        # 写入表头, 便于下游解析消费 / Write header for downstream parsing
-        bbox_fp.write('# frame_id, cls_id, x, y, w, h, conf\n')
-        print(f'BBox-only output enabled. Video writer is disabled. BBox file: {bbox_path}')
+        # 写入表头 + 归一化标识, 便于 bbox_video_synth.py 自动识别坐标尺度 / Write header + normalization tag so downstream can auto-detect coord scale
+        bbox_fp.write(f'# frame_id, cls_id, x, y, w, h, conf\n')
+        bbox_fp.write(f'# normalized: {"true" if bbox_normalized else "false"} (x/w 利用 im_w 归一; y/h 利用 im_h 归一 / x, w normalized by im_w; y, h normalized by im_h)\n')
+        print(f'BBox-only output enabled. Video writer is disabled. BBox file: {bbox_path} | normalized={bbox_normalized}')
 
     if bbox_only:
         # bbox-only不需要视频编码器 / No video codec needed in bbox-only mode
@@ -233,6 +236,8 @@ def detect_video():
                     pred[:, :4] = scale_coords(img.shape[2:], pred[:, :4], im0.shape).round()
                     if bbox_only:
                         # bbox-only模式: 输出xywh到文本文件, 不画bbox不写视频 / bbox-only mode: write xywh to text file, skip drawing and video writing
+                        # 原始帧宽高, 用于归一化 (im0.shape: HxWxC) / Source frame H/W used for normalization (im0.shape: HxWxC)
+                        im_h, im_w = im0.shape[0], im0.shape[1]
                         for *xyxy, conf, cls in pred:
                             # xyxy顺序: x1,y1,x2,y2; 转成tight top-left + w,h / xyxy order: x1,y1,x2,y2; convert to top-left + w,h
                             x1 = float(xyxy[0])
@@ -241,9 +246,18 @@ def detect_video():
                             y2 = float(xyxy[3])
                             w = x2 - x1
                             h = y2 - y1
+                            if bbox_normalized:
+                                # 归一化输出: x,w 除以 im_w; y,h 除以 im_h / Normalized: x,w / im_w ; y,h / im_h
+                                x_out = x1 / im_w if im_w > 0 else 0.0
+                                y_out = y1 / im_h if im_h > 0 else 0.0
+                                w_out = w / im_w if im_w > 0 else 0.0
+                                h_out = h / im_h if im_h > 0 else 0.0
+                            else:
+                                # 像素输出, 保持原行为 (向后兼容) / Pixel output, keep original behavior (backward compatible)
+                                x_out, y_out, w_out, h_out = x1, y1, w, h
                             # frame_id 对应当前采样帧在原视频中的索引 / frame_id is the index of the current sampled frame in the source video
                             bbox_fp.write(
-                                f'{frame_idx}, {int(cls)}, {x1:.2f}, {y1:.2f}, {w:.2f}, {h:.2f}, {float(conf):.6f}\n'
+                                f'{frame_idx}, {int(cls)}, {x_out:.6f}, {y_out:.6f}, {w_out:.6f}, {h_out:.6f}, {float(conf):.6f}\n'
                             )
                     else:
                         for *xyxy, conf, cls in reversed(pred):
@@ -387,6 +401,8 @@ if __name__ == '__main__':
     parser.add_argument('--heat_decay_seconds', type=float, default=60.0, help='Heatmap decay window in seconds')
     parser.add_argument('--heatmap_alpha', type=float, default=0.35, help='Heatmap overlay alpha in [0, 1]')
     parser.add_argument('--bbox_output', action='store_true', help='Only output bbox text file (frame_id, cls_id, x, y, w, h, conf); skip video writing')
+    parser.add_argument('--bbox_normalized', action='store_true',
+                        help='Normalize bbox x/y/w/h to [0,1] by original frame size (x,w/im_w; y,h/im_h). Only valid when --bbox_output is set')
 
     opt = parser.parse_args()
     detect_video()

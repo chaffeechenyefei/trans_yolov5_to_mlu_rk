@@ -38,15 +38,18 @@ python detect.py --weights weights/yolov5s-conv-head-20220121.pt --source data/i
 
 ### [modified] bbox 文件输出
 - 已支持通过 `--bbox_output` CLI flag 开启"仅 bbox"模式: 该模式下不再输出视频文件, 仅输出 `<video_name>_bbox.txt`。
-- 输出格式(每行 7 个字段, 逗号分隔, 文件首行为 `#` 注释 header):
+- 输出格式(每行 7 个字段, 逗号分隔), 文件前两行为 `#` 注释 header:
   ```
   # frame_id, cls_id, x, y, w, h, conf
+  # normalized: true|false (x, w normalized by im_w; y, h normalized by im_h)
   ```
   其中:
   - `frame_id` = 该帧在**原视频**中的整数索引(并非采样后的连续序号), 即 `frame_id % frame_interval == 0` 的那些帧。
-  - `x, y` = bbox 在**原画面分辨率**下的 top-left 坐标(已通过 `scale_coords` 还原到 `im0` 尺寸)。
-  - `w, h` = bbox 的宽与高, `w = x2 - x1`, `h = y2 - y1`。
+  - `x, y` = bbox 的 top-left 坐标。 `w, h` = bbox 的宽与高, `w = x2 - x1`, `h = y2 - y1`。
+  - 默认为像素坐标 (normalized=false, 已通过 `scale_coords` 还原到 `im0` 即原画面分辨率)。
+  - 加 `--bbox_normalized` 后, `x, w` 除以 `im_w`; `y, h` 除以 `im_h`, 全部位于 `[0, 1]` 区间; 适合与不同分辨率视频互用 / 与其它画报工具兼容。
   - `conf` = 检测置信度, 保留 6 位小数。
+- 第二行 `# normalized: true|false` 头是给下游 `bbox_video_synth.py` 自动识别坐标尺度用的; 若手工修改请同步修改这一行。
 - 该模式下不会执行 bbox 绘制、resize、热力图、视频编码、`cv2.imshow` 等任何与画面合成相关的操作, 推理吞吐更高。
 - 与 `--enable_heatmap` 互斥: 同时设置时, `--bbox_output` 优先(heatmap 在 bbox-only 模式下不生效)。
 - 目的是, 将来可以将 bbox 和原始 video 再次合成带 bbox 的 video, 文件体积远小于 in-line 绘制的检测结果视频。
@@ -58,6 +61,10 @@ python detect.py --weights weights/yolov5s-conv-head-20220121.pt --source data/i
 - bbox 解析严格遵循 `detect_video.py` 的输出格式 `# frame_id, cls_id, x, y, w, h, conf`:
   - `frame_id` 视为原视频整数帧索引, 与 `--sample_fps` 配合计算 `frame_interval = round(src_fps / sample_fps)`;
   - `(x, y, w, h)` 视为 top-left + 宽高, 还原为 `(x1, y1, x2 = x+w, y2 = y+h)` 后直接在原画面绘制。
+  - **坐标尺度自动识别** (从 bbox 文件 header `# normalized: true|false` 读取):
+    - `normalized=true` 时, 绘制前会反归一化 (`x1,x2 *= im_w; y1,y2 *= im_h`), 不需手动调整;
+    - `normalized=false` 或缺头时, 默认按像素坐标使用 (向后兼容旧文件)。
+  - 可通过 CLI `--bbox_normalized true|false` 强制覆盖 (例如 header 缺失但已知是归一化数据)。
 - **关键约束**: 调用本脚本时 `--sample_fps` 必须与生成 bbox 时使用的值一致, 否则 bbox 会被错位投影到错误的帧。
 - 非采样帧(即 bbox 文件中没有对应行的中间帧)处理策略, 通过 `--non_sampled_strategy` 控制:
   - `hold_last`(默认): 沿用最近一次采样帧的 bbox, 视觉上呈现 "跟踪" 效果;
@@ -118,8 +125,15 @@ python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/
 
 bbox only 输出
 ```shell
-# 仅输出 bbox 文件, 跳过视频写入, 用于后续与原视频合成 / Output bbox text only, skip video writing, re-composable later
+# 仅输出 bbox 文件(像素坐标), 跳过视频写入, 用于后续与原视频合成 / Output pixel-coord bbox text only
 python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/rtmart-001.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --bbox_output
+
+# 归一化 bbox 输出(x,y,w,h 均为 [0,1]) / Normalized bbox output (x,y,w,h in [0,1])
+# bbox 文件首行会带上 `# normalized: true` 标识, bbox_video_synth.py 会自动识别并反归一化
+python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/rtmart-001.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --bbox_output --bbox_normalized
+python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/rtmart-002.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --bbox_output --bbox_normalized
+python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/rtmart-003.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --bbox_output --bbox_normalized
+python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/rtmart-004.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --bbox_output --bbox_normalized
 
 python detect_video.py --weights weights/yolov5s-people.pt --source data/videos/rtmart-002.mp4 --save_dir data/result --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 --device cpu --sample_fps 25 --bbox_output
 
@@ -136,6 +150,12 @@ python bbox_video_synth.py --source data/videos/rtmart-001.mp4 --save_dir data/r
 
 # head 检测的合成可视化, 同时叠加 frame_id 水印便于与 bbox txt 对照 / Head detection synthesis with frame_id watermark
 python bbox_video_synth.py --source data/videos/rtmart-001.mp4 --save_dir data/result --sample_fps 25 --codec auto --output_scale 0.75 --names head --show_frame_id
+
+# bbox 文件为归一化格式时, 合成脚本会自动识别 header `# normalized: true` 并反归一化, 无需额外参数 / When bbox file uses normalized coords, the synth script auto-detects from header
+python bbox_video_synth.py --source data/videos/rtmart-001.mp4 --save_dir data/result --sample_fps 25 --codec auto --output_scale 0.75 --names head
+
+# 如 header 缺失但已知是归一化数据, 可强制指定 / Force normalized flag when header is missing but coords are known to be normalized
+python bbox_video_synth.py --source data/videos/rtmart-001.mp4 --save_dir data/result --sample_fps 25 --codec auto --output_scale 0.75 --bbox_normalized true
 
 # people 检测合成, 中间帧 bbox 全透明透传 / People synthesis with passthrough for non-sampled frames
 python bbox_video_synth.py --source data/videos/rtmart-002.mp4 --save_dir data/result --sample_fps 25 --codec auto --output_scale 0.75 --names person --non_sampled_strategy passthrough

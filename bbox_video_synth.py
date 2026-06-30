@@ -51,17 +51,37 @@ def _stable_color(cls_id):
     return [rng.randint(0, 255) for _ in range(3)]
 
 
-def _parse_bbox_file(bbox_path):
-    # 解析 bbox 文本文件, 返回 frame_id -> list of (cls_id, x1, y1, x2, y2, conf)
+def _parse_bbox_file(bbox_path, force_normalized=None):
+    # 解析 bbox 文本文件, 返回 (frame_id -> list of (cls_id, x1, y1, x2, y2, conf), normalized_flag)
     # 第 7 个字段为 conf, 第 3~6 个字段是 (x, y, w, h), 表示 top-left 坐标 + 宽高
-    # Parse bbox text file into frame_id -> list of (cls_id, x1, y1, x2, y2, conf)
-    # The 7th column is conf; columns 3..6 are (x, y, w, h) which is top-left + width/height
+    #
+    # 坐标尺度识别优先级:
+    #   1) force_normalized: 调用方显式指定 (True/False), 覆盖 header
+    #   2) header `# normalized: true|false` 自动识别 (detect_video.py 写入)
+    #   3) 默认 False (像素坐标, 向后兼容旧文件)
+    #
+    # Parse bbox text file into (frame_id -> list of (cls_id, x1, y1, x2, y2, conf), normalized_flag)
+    # The 7th column is conf; columns 3..6 are (x, y, w, h) which is top-left + width/height.
+    # Coordinate scale detection priority:
+    #   1) force_normalized overrides header
+    #   2) header `# normalized: true|false` auto-detect
+    #   3) defaults to False (pixel coords, backward compat)
     bboxes_per_frame = defaultdict(list)
     max_frame_id = -1
+    header_normalized = None
     with open(bbox_path, 'r', encoding='utf-8') as f:
         for raw in f:
             s = raw.strip()
-            if not s or s.startswith('#'):
+            if not s:
+                continue
+            if s.startswith('#'):
+                # 解析 header 中的归一化标识, 不区分大小写 / Parse normalization flag from header, case-insensitive
+                low = s.lower()
+                if 'normalized:' in low:
+                    tail = low.split('normalized:', 1)[1].strip()
+                    # 取首个 token, 例如 "true (...)" -> "true" / Take first token, e.g. "true (...)" -> "true"
+                    token = tail.split()[0] if tail.split() else ''
+                    header_normalized = (token in ('1', 'true', 'yes', 'y'))
                 continue
             parts = s.split(',')
             if len(parts) != 7:
@@ -85,7 +105,14 @@ def _parse_bbox_file(bbox_path):
             if frame_id > max_frame_id:
                 max_frame_id = frame_id
 
-    return bboxes_per_frame, max_frame_id
+    if force_normalized is not None:
+        normalized_flag = bool(force_normalized)
+    elif header_normalized is not None:
+        normalized_flag = header_normalized
+    else:
+        normalized_flag = False
+
+    return bboxes_per_frame, max_frame_id, normalized_flag
 
 
 def _draw_boxes(im0, boxes, names, color_map, conf_threshold, label_fmt):
@@ -228,12 +255,15 @@ def synthesize():
     sample_fps = max(opt.sample_fps, 0.01)
     frame_interval = max(int(round(src_fps / sample_fps)), 1)
 
-    bboxes_per_frame, max_bbox_frame_id = _parse_bbox_file(bbox_path)
+    # 调用方通过 CLI --bbox_normalized 显式覆盖; 为 None 时依据 header 自动识别 / CLI --bbox_normalized overrides header; None means auto-detect from header
+    force_normalized = opt.bbox_normalized if opt.bbox_normalized is not None else None
+    bboxes_per_frame, max_bbox_frame_id, bbox_normalized = _parse_bbox_file(bbox_path, force_normalized=force_normalized)
     bbox_count = sum(len(v) for v in bboxes_per_frame.values())
     print(
         f'BBox file: {bbox_path} | Loaded {bbox_count} boxes across '
         f'{len(bboxes_per_frame)} sampled frames '
-        f'(frame_interval={frame_interval}, source_fps={src_fps:.2f})'
+        f'(frame_interval={frame_interval}, source_fps={src_fps:.2f}, '
+        f'normalized={bbox_normalized})'
     )
     if max_bbox_frame_id >= 0:
         print(f'  bbox max frame_id: {max_bbox_frame_id}')
@@ -266,7 +296,15 @@ def synthesize():
             is_sampled_frame = (frame_idx % frame_interval == 0)
             if is_sampled_frame:
                 # 当前帧就是 detect_video.py 真正推理过的帧, 直接使用其 bbox / This frame was actually inferred
-                boxes = bboxes_per_frame.get(frame_idx, [])
+                raw_boxes = bboxes_per_frame.get(frame_idx, [])
+                if bbox_normalized:
+                    # 反归一化: x1,x2 乘 im_w; y1,y2 乘 im_h, 还原为像素坐标供画框 / Denormalize back to pixels: x1,x2 * im_w; y1,y2 * im_h
+                    boxes = [
+                        (cls_id, x1 * width, y1 * height, x2 * width, y2 * height, conf)
+                        for (cls_id, x1, y1, x2, y2, conf) in raw_boxes
+                    ]
+                else:
+                    boxes = raw_boxes
                 held_boxes = boxes
                 last_sampled_frame_id = frame_idx
             else:
@@ -384,6 +422,13 @@ if __name__ == '__main__':
                         choices=['hold_last', 'passthrough'],
                         help='非采样帧处理策略: hold_last=沿用上一采样帧 bbox, passthrough=原画面透传 / How to handle frames between two sampled frames')
     parser.add_argument('--show_frame_id', action='store_true', help='在画面上叠加 frame_id 水印 / Overlay frame_id watermark')
+    parser.add_argument('--bbox_normalized', type=str, default=None,
+                        choices=['true', 'false'],
+                        help='强制指定 bbox 文件是否归一化 (true/false); 不传则按 header `# normalized:` 自动识别 / Force bbox normalized flag; auto-detect from header if omitted')
 
     opt = parser.parse_args()
+
+    # 把字符串选项转换为三态: True / False / None (None=自动识别 header) / Convert string to tri-state
+    if opt.bbox_normalized is not None:
+        opt.bbox_normalized = (opt.bbox_normalized == 'true')
     synthesize()
