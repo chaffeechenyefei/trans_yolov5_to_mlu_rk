@@ -164,19 +164,36 @@ def detect_video():
 
     video_name = os.path.splitext(os.path.basename(source))[0]
     save_path = os.path.join(save_dir, f'{video_name}_detect.mp4')
-    writer, chosen_codec, codec_candidates = _create_video_writer(save_path, out_fps, out_width, out_height, opt.codec)
 
-    if writer is None:
-        cap.release()
-        raise RuntimeError(f'Cannot open video writer: {save_path}')
+    # bbox-only模式: 仅写bbox文本文件, 跳过视频写入以提升吞吐 / bbox-only mode: write bbox text file only, skip video writing for higher throughput
+    bbox_only = bool(opt.bbox_output)
+    bbox_path = os.path.join(save_dir, f'{video_name}_bbox.txt') if bbox_only else None
+    # 文本写入句柄在finally中统一关闭 / File handle is closed in finally block
+    bbox_fp = open(bbox_path, 'w', encoding='utf-8') if bbox_only else None
+    if bbox_only:
+        # 写入表头, 便于下游解析消费 / Write header for downstream parsing
+        bbox_fp.write('# frame_id, cls_id, x, y, w, h, conf\n')
+        print(f'BBox-only output enabled. Video writer is disabled. BBox file: {bbox_path}')
 
-    # 明确输出用户请求编码器与实际编码器，便于定位是否发生回退 / Print requested and actual codec to confirm fallback behavior
-    fallback_tag = ' (fallback applied)' if str(opt.codec).lower() == 'auto' and chosen_codec != codec_candidates[0] else ''
-    print(
-        f'Requested codec: {opt.codec} | Selected codec: {chosen_codec}{fallback_tag} '
-        f'| Tried: {" -> ".join(codec_candidates)}'
-    )
-    print(f'Video writer output: {out_width}x{out_height} @ {out_fps:.2f} fps')
+    if bbox_only:
+        # bbox-only不需要视频编码器 / No video codec needed in bbox-only mode
+        writer = None
+        chosen_codec = None
+        codec_candidates = []
+    else:
+        writer, chosen_codec, codec_candidates = _create_video_writer(save_path, out_fps, out_width, out_height, opt.codec)
+
+        if writer is None:
+            cap.release()
+            raise RuntimeError(f'Cannot open video writer: {save_path}')
+
+        # 明确输出用户请求编码器与实际编码器，便于定位是否发生回退 / Print requested and actual codec to confirm fallback behavior
+        fallback_tag = ' (fallback applied)' if str(opt.codec).lower() == 'auto' and chosen_codec != codec_candidates[0] else ''
+        print(
+            f'Requested codec: {opt.codec} | Selected codec: {chosen_codec}{fallback_tag} '
+            f'| Tried: {" -> ".join(codec_candidates)}'
+        )
+        print(f'Video writer output: {out_width}x{out_height} @ {out_fps:.2f} fps')
     heatmap_alpha = min(max(float(opt.heatmap_alpha), 0.0), 1.0)
     if opt.enable_heatmap:
         # 输出热力图参数，便于回溯实验配置 / Print heatmap settings for reproducible experiments
@@ -214,10 +231,55 @@ def detect_video():
 
                 if len(pred):
                     pred[:, :4] = scale_coords(img.shape[2:], pred[:, :4], im0.shape).round()
-                    for *xyxy, conf, cls in reversed(pred):
-                        c = int(cls)
-                        label = f'{names[c]} {conf:.2f}'
-                        plot_one_box(xyxy, im0, label=label, color=colors[c], line_thickness=2)
+                    if bbox_only:
+                        # bbox-only模式: 输出xywh到文本文件, 不画bbox不写视频 / bbox-only mode: write xywh to text file, skip drawing and video writing
+                        for *xyxy, conf, cls in pred:
+                            # xyxy顺序: x1,y1,x2,y2; 转成tight top-left + w,h / xyxy order: x1,y1,x2,y2; convert to top-left + w,h
+                            x1 = float(xyxy[0])
+                            y1 = float(xyxy[1])
+                            x2 = float(xyxy[2])
+                            y2 = float(xyxy[3])
+                            w = x2 - x1
+                            h = y2 - y1
+                            # frame_id 对应当前采样帧在原视频中的索引 / frame_id is the index of the current sampled frame in the source video
+                            bbox_fp.write(
+                                f'{frame_idx}, {int(cls)}, {x1:.2f}, {y1:.2f}, {w:.2f}, {h:.2f}, {float(conf):.6f}\n'
+                            )
+                    else:
+                        for *xyxy, conf, cls in reversed(pred):
+                            c = int(cls)
+                            label = f'{names[c]} {conf:.2f}'
+                            plot_one_box(xyxy, im0, label=label, color=colors[c], line_thickness=2)
+                elif bbox_only:
+                    pass  # 该帧无检测结果, 不写任何bbox行 / No detection for this frame, write nothing
+
+                if bbox_only:
+                    # bbox-only模式: 仅记录推理fps, 不做任何画面合成与视频写入 / bbox-only mode: only track inference fps, skip overlay/resize/write
+                    infer_time = max(time.time() - t0, 1e-6)
+                    infer_fps = 1.0 / infer_time
+                    if infer_fps_ema is None:
+                        infer_fps_ema = infer_fps
+                    else:
+                        infer_fps_ema = infer_fps_ema * 0.9 + infer_fps * 0.1
+
+                    processed += 1
+
+                    elapsed = max(time.time() - start_time, 1e-6)
+                    avg_proc_fps = processed / elapsed
+                    if sampled_total_frames > 0:
+                        processed_pct = min(processed / sampled_total_frames * 100.0, 100.0)
+                        remaining_pct = max(100.0 - processed_pct, 0.0)
+                        progress_info = f' | Progress: {processed_pct:.2f}% | Remaining: {remaining_pct:.2f}%'
+                    else:
+                        progress_info = ''
+                    print(
+                        f'\rProcessed frames: {processed} | Avg FPS: {avg_proc_fps:.2f} | Current FPS: {infer_fps_ema:.2f}{progress_info}',
+                        end='',
+                        flush=True,
+                    )
+
+                    frame_idx += 1
+                    continue
 
                 if opt.enable_heatmap:
                     # 使用视频时间而不是墙钟时间，确保离线处理与实时播放权重一致 / Use video timeline instead of wall-clock time for stable offline/online behavior
@@ -279,7 +341,12 @@ def detect_video():
         print('\nInterrupted by Ctrl+C. Saving current output...')
     finally:
         cap.release()
-        writer.release()
+        if writer is not None:
+            writer.release()
+        if bbox_fp is not None:
+            # 显式flush+close, 保证Ctrl+C中断后bbox文件落盘 / Explicit flush+close to ensure bbox file is persisted after Ctrl+C
+            bbox_fp.flush()
+            bbox_fp.close()
         cv2.destroyAllWindows()
 
     total_elapsed = max(time.time() - start_time, 1e-6)
@@ -289,12 +356,19 @@ def detect_video():
         final_progress_info = f' Progress: {final_processed_pct:.2f}% | Remaining: {final_remaining_pct:.2f}%.'
     else:
         final_progress_info = ''
-    print(
-        f'\nDone. Output saved to: {save_path}. '
-        f'Processed {processed} frames in {total_elapsed:.2f}s.{final_progress_info}'
-    )
-    # 结束再次输出最终编码器，避免中途日志被覆盖 / Print selected codec again at end in case progress logs overwrite earlier output
-    print(f'Final selected codec: {chosen_codec}')
+
+    if bbox_only:
+        print(
+            f'\nDone. BBox file saved to: {bbox_path}. '
+            f'Processed {processed} frames in {total_elapsed:.2f}s.{final_progress_info}'
+        )
+    else:
+        print(
+            f'\nDone. Output saved to: {save_path}. '
+            f'Processed {processed} frames in {total_elapsed:.2f}s.{final_progress_info}'
+        )
+        # 结束再次输出最终编码器，避免中途日志被覆盖 / Print selected codec again at end in case progress logs overwrite earlier output
+        print(f'Final selected codec: {chosen_codec}')
 
 
 if __name__ == '__main__':
@@ -312,6 +386,7 @@ if __name__ == '__main__':
     parser.add_argument('--enable_heatmap', action='store_true', help='Overlay weighted heatmap on output video')
     parser.add_argument('--heat_decay_seconds', type=float, default=60.0, help='Heatmap decay window in seconds')
     parser.add_argument('--heatmap_alpha', type=float, default=0.35, help='Heatmap overlay alpha in [0, 1]')
+    parser.add_argument('--bbox_output', action='store_true', help='Only output bbox text file (frame_id, cls_id, x, y, w, h, conf); skip video writing')
 
     opt = parser.parse_args()
     detect_video()
