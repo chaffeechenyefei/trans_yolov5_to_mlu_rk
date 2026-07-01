@@ -255,6 +255,7 @@ python plane_heatmap.py \
   --plane_width 1920 --plane_height 1080 \
   --window_duration_seconds 300 \
   --delta --rate_of_change \
+  --roi_json data/calibration/roi_sample.json \
   --output_dir data/result/
 
 # Step 3: 在浏览器中打开 dashboard 查看结果
@@ -262,3 +263,9 @@ python plane_heatmap.py \
 ```
 
 > **注意**: 使用前需准备好 `data/calibration/floor_plan.png` (超市平面图) 并完成 Step 1 的交互式标定。
+
+## [new] 2. dashboard没有信息
+### 2.1 现状与期望
+- 已经按要求执行 Step 1: 交互式标定 (每个 camera 执行一次, 需人工点击对应点) -> Step 2: 生成平面热力图 (两窗口 + 差值 + 变化率)
+- 打开 data/result/dashboard.html 后, 没有任何统计信息
+

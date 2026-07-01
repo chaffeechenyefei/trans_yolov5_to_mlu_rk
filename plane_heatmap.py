@@ -23,11 +23,20 @@ import numpy as np
 
 def _parse_group_spec(group_str: str) -> Tuple[str, Dict[str, str]]:
     """解析 --group 参数: 'window_label:camera_name=path,camera_name=path'
-    Parse --group argument into (window_label, {camera_name: bbox_path})."""
-    if ':' not in group_str:
+    支持 label 内含冒号 (如 '19:00'), 通过定位第一个 '=' 之前的最后一个 ':' 来拆分.
+    Parse --group argument into (window_label, {camera_name: bbox_path}).
+    Supports labels containing colons (e.g., '19:00') by splitting at the last colon
+    before the first '=' character."""
+    if '=' not in group_str:
+        raise ValueError(f'无效的 group 格式, 缺少 camera=path 对 / Invalid group format: {group_str}')
+    # 定位第一个 '=' 之前的最后一个 ':', 作为 label 与 camera 列表的分界
+    # Find the last ':' before the first '=' to split label from camera list
+    eq_pos = group_str.index('=')
+    sep_pos = group_str.rfind(':', 0, eq_pos)
+    if sep_pos == -1:
         raise ValueError(f'无效的 group 格式, 需要 label:xxx=yyy / Invalid group format: {group_str}')
-    label, rest = group_str.split(':', 1)
-    label = label.strip()
+    label = group_str[:sep_pos].strip()
+    rest = group_str[sep_pos + 1:]
     camera_map = {}
     for pair in rest.split(','):
         pair = pair.strip()
@@ -310,6 +319,19 @@ def plane_heatmap():
             im_h = calib['image_height']
             H = calib['homography_matrix']
 
+            # 若目标平面尺寸与标定时不同, 缩放 Homography 矩阵以匹配新尺寸
+            # Scale homography to match target plane dimensions if different from calibration
+            calib_plane_w = calib.get('plane_width', opt.plane_width)
+            calib_plane_h = calib.get('plane_height', opt.plane_height)
+            if calib_plane_w != opt.plane_width or calib_plane_h != opt.plane_height:
+                sx = opt.plane_width / calib_plane_w
+                sy = opt.plane_height / calib_plane_h
+                S = np.array([[sx, 0, 0], [0, sy, 0], [0, 0, 1]], dtype=np.float64)
+                H = S @ H
+                print(f'  {cam_name}: Homography 已从标定平面 ({calib_plane_w}x{calib_plane_h}) '
+                      f'缩放到目标平面 ({opt.plane_width}x{opt.plane_height}) / '
+                      f'Homography scaled from calibration plane to target plane')
+
             bboxes, normalized = load_bbox_file(bbox_path)
             if not bboxes:
                 print(f'  ! {cam_name}: bbox 文件为空 / Empty bbox file: {bbox_path}')
@@ -339,7 +361,8 @@ def plane_heatmap():
         rendered = render_heatmap(plane_heat, plane_image, alpha=opt.heatmap_alpha)
         rendered = add_colorbar(rendered, vmin=0.0, vmax=heat_max)
 
-        output_path = os.path.join(opt.output_dir, f'plane_heatmap_{window_label}.png')
+        safe_label = window_label.replace(':', '_')  # 冒号在 URL/文件名中可能引起问题
+        output_path = os.path.join(opt.output_dir, f'plane_heatmap_{safe_label}.png')
         cv2.imwrite(output_path, rendered)
         print(f'  ✓ 输出: {output_path} (max_heat={heat_max:.2f}) / '
               f'Saved: {output_path} (max_heat={heat_max:.2f})')
@@ -380,7 +403,8 @@ def plane_heatmap():
                     (12, delta_color.shape[0] - 16),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
 
-        delta_path = os.path.join(opt.output_dir, f'plane_heatmap_delta_{label_a}_{label_b}.png')
+        delta_path = os.path.join(opt.output_dir,
+                                  f'plane_heatmap_delta_{label_a.replace(":", "_")}_{label_b.replace(":", "_")}.png')
         cv2.imwrite(delta_path, delta_color)
         print(f'  ✓ 差值图输出: {delta_path} / Delta saved: {delta_path}')
 
@@ -415,7 +439,8 @@ def plane_heatmap():
                     (12, roc_color.shape[0] - 16),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
 
-        roc_path = os.path.join(opt.output_dir, f'plane_heatmap_roc_{label_a}_{label_b}.png')
+        roc_path = os.path.join(opt.output_dir,
+                                f'plane_heatmap_roc_{label_a.replace(":", "_")}_{label_b.replace(":", "_")}.png')
         cv2.imwrite(roc_path, roc_color)
         print(f'  ✓ 变化率图输出: {roc_path} / Rate-of-change saved: {roc_path}')
 
@@ -430,7 +455,20 @@ def _compute_roi_stats(roi_json_path: str, window_heat_grids: Dict[str, np.ndarr
     """按 ROI 定义计算各区域的统计值并输出 JSON 和 CSV 表格.
     Compute per-ROI statistics from heat grids and output JSON + CSV."""
     with open(roi_json_path, 'r', encoding='utf-8') as f:
-        rois = json.load(f)
+        roi_data = json.load(f)
+
+    # 兼容两种 JSON 格式: {"regions": [...]} 或直接 [...]
+    # Support both JSON formats: {"regions": [...]} or bare [...]
+    if isinstance(roi_data, list):
+        rois = roi_data
+    elif isinstance(roi_data, dict):
+        rois = roi_data.get('regions', roi_data.get('rois', []))
+    else:
+        rois = []
+
+    if not rois:
+        print('  ! ROI JSON 中没有找到 regions/rois 数组 / No regions array found in ROI JSON')
+        return
 
     labels = list(window_heat_grids.keys())
     results = []
