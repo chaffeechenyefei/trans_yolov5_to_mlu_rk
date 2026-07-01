@@ -1,0 +1,10 @@
+{
+  "_comment": "ROI (Region of Interest) 定义文件。每个 ROI 定义一个矩形区域, 用于区域级别统计分析。Define rectangular zones for per-zone statistical analysis.",
+  "regions": [
+    {"name": "入口区/Entrance", "x1": 0, "y1": 0, "x2": 640, "y2": 360},
+    {"name": "生鲜区/Fresh", "x1": 640, "y1": 0, "x2": 1280, "y2": 540},
+    {"name": "日用品区/Daily", "x1": 0, "y1": 360, "x2": 640, "y2": 720},
+    {"name": "收银区/Checkout", "x1": 640, "y1": 540, "x2": 1280, "y2": 720},
+    {"name": "通道区/Aisle", "x1": 1280, "y1": 0, "x2": 1920, "y2": 1080}
+  ]
+}
