@@ -254,15 +254,15 @@ def add_colorbar(image: np.ndarray, vmin: float = 0.0, vmax: float = 1.0) -> np.
     text_color = (255, 255, 255)
 
     # 最大值 (红/热) / Max (red/hot)
-    cv2.putText(canvas, f'{vmax:.1f}', (w + bar_margin + bar_width + 3, bar_margin + 12),
+    cv2.putText(canvas, f'{vmax:.1f}s', (w + bar_margin + bar_width + 3, bar_margin + 12),
                 font, font_scale, text_color, 1, cv2.LINE_AA)
     # 最小值 (蓝/冷) / Min (blue/cold)
-    cv2.putText(canvas, f'{vmin:.1f}', (w + bar_margin + bar_width + 3, bar_margin + bar_height - 5),
+    cv2.putText(canvas, f'{vmin:.0f}s', (w + bar_margin + bar_width + 3, bar_margin + bar_height - 5),
                 font, font_scale, text_color, 1, cv2.LINE_AA)
     # 中间值 / Mid value
     mid_y = bar_margin + bar_height // 2
     mid_val = (vmax + vmin) / 2.0
-    cv2.putText(canvas, f'{mid_val:.1f}', (w + bar_margin + bar_width + 3, mid_y),
+    cv2.putText(canvas, f'{mid_val:.0f}s', (w + bar_margin + bar_width + 3, mid_y),
                 font, font_scale, text_color, 1, cv2.LINE_AA)
 
     return canvas
@@ -345,13 +345,18 @@ def plane_heatmap():
             print(f'  {cam_name}: {len(bboxes)} bboxes, {len(frame_bboxes)} 帧 / '
                   f'{len(bboxes)} bboxes, {len(frame_bboxes)} frames')
 
-            # 逐帧投影并累加 / Project per frame and accumulate
+            # 逐帧投影并累加 (不除以窗口时长, 最后除以 FPS 得到人·秒)
+            # Project per frame and accumulate; divide by FPS at end to get person-seconds
+            total_frames = 0
             for frame_id in sorted(frame_bboxes.keys()):
                 frame_pts = project_foot_points(frame_bboxes[frame_id], H, im_w, im_h, normalized)
                 frame_heat = accumulate_heat_grid(frame_pts, opt.plane_width, opt.plane_height)
-                # 按窗口时长归一化: 避免因为窗口时长不完全一致导致的绝对值偏差
-                # Normalize by window duration: avoid bias from slightly different window lengths
-                plane_heat += frame_heat / max(opt.window_duration_seconds, 1.0)
+                plane_heat += frame_heat
+                total_frames += 1
+
+        # 除以 FPS: 将 "检测-帧" 转为 "人·秒 (person-seconds)"
+        # Divide by FPS: convert detection-frames to person-seconds
+        plane_heat = plane_heat / max(opt.fps, 1.0)
 
         # 保存该窗口的热力网格 / Store heat grid for this window
         window_heat_grids[window_label] = plane_heat
@@ -364,8 +369,7 @@ def plane_heatmap():
         safe_label = window_label.replace(':', '_')  # 冒号在 URL/文件名中可能引起问题
         output_path = os.path.join(opt.output_dir, f'plane_heatmap_{safe_label}.png')
         cv2.imwrite(output_path, rendered)
-        print(f'  ✓ 输出: {output_path} (max_heat={heat_max:.2f}) / '
-              f'Saved: {output_path} (max_heat={heat_max:.2f})')
+        print(f'  ✓ 输出: {output_path} (max={heat_max:.1f}s / 该像素点最多累计人·秒)')
 
     # --- 差值热力图 (Delta Heatmap) / Delta between two windows ---
     if opt.delta and len(window_heat_grids) >= 2:
@@ -406,7 +410,7 @@ def plane_heatmap():
         delta_path = os.path.join(opt.output_dir,
                                   f'plane_heatmap_delta_{label_a.replace(":", "_")}_{label_b.replace(":", "_")}.png')
         cv2.imwrite(delta_path, delta_color)
-        print(f'  ✓ 差值图输出: {delta_path} / Delta saved: {delta_path}')
+        print(f'  ✓ 差值图输出: {delta_path} (Δ范围: {-delta_abs_max:.1f}s ~ +{delta_abs_max:.1f}s)')
 
     # --- 变化率热力图 (可选) / Rate-of-change heatmap (optional) ---
     if opt.rate_of_change and len(window_heat_grids) >= 2:
@@ -444,9 +448,10 @@ def plane_heatmap():
         cv2.imwrite(roc_path, roc_color)
         print(f'  ✓ 变化率图输出: {roc_path} / Rate-of-change saved: {roc_path}')
 
-    # --- 区域统计 JSON 输出 / ROI statistics JSON output ---
+    # --- 区域统计 JSON 输出 + 注入 Dashboard / ROI statistics JSON output + inject into dashboard ---
     if opt.roi_json and os.path.isfile(opt.roi_json) and len(window_heat_grids) >= 2:
         _compute_roi_stats(opt.roi_json, window_heat_grids, opt.output_dir)
+        _inject_roi_into_dashboard(opt.output_dir)
 
     print('\n全部完成 / Done.')
 
@@ -515,6 +520,29 @@ def _compute_roi_stats(roi_json_path: str, window_heat_grids: Dict[str, np.ndarr
         print(f'  ✓ ROI 统计 CSV: {csv_path}')
 
 
+def _inject_roi_into_dashboard(output_dir: str):
+    """将 roi_statistics.json 数据动态注入 dashboard.html, 避免 file:// 协议下 fetch CORS 限制.
+    Inject roi_statistics.json data into dashboard.html to bypass CORS under file:// protocol."""
+    stats_path = os.path.join(output_dir, 'roi_statistics.json')
+    dashboard_path = os.path.join(output_dir, 'dashboard.html')
+
+    if not os.path.isfile(stats_path) or not os.path.isfile(dashboard_path):
+        return
+
+    with open(stats_path, 'r', encoding='utf-8') as f:
+        stats_json_str = f.read().strip()
+
+    with open(dashboard_path, 'r', encoding='utf-8') as f:
+        html = f.read()
+
+    html = html.replace('__ROI_STATS_PLACEHOLDER__', stats_json_str)
+
+    with open(dashboard_path, 'w', encoding='utf-8') as f:
+        f.write(html)
+
+    print(f'  ✓ Dashboard 已更新 ROI 统计数据: {dashboard_path} / Dashboard updated with ROI stats')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='多相机 2D 平面热力图生成器 / Multi-camera 2D plane heatmap generator')
@@ -532,6 +560,8 @@ if __name__ == '__main__':
                         help='平面热力图高度 (px) / Plane heatmap height in pixels')
     parser.add_argument('--window_duration_seconds', type=float, default=300.0,
                         help='窗口时长 (秒), 用于跨窗口归一化 / Window duration in seconds for cross-window normalization')
+    parser.add_argument('--fps', type=float, default=25.0,
+                        help='视频帧率 (用于将累积值转为物理秒) / Video FPS for converting accumulation to physical seconds')
     parser.add_argument('--heatmap_alpha', type=float, default=0.55,
                         help='热力图叠加透明度 [0, 1] / Heatmap overlay alpha')
     parser.add_argument('--delta', action='store_true',
