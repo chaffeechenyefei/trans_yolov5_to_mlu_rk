@@ -2,6 +2,8 @@
 .vscode/
 .idea/
 weights/*.pt
+weights/*.onnx
+weights/*.onnx.data
 __pycache__/
 data/result/
 data/videos/
