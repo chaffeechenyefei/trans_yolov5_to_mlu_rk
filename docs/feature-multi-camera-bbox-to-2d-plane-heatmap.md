@@ -673,17 +673,17 @@ cd /Users/chaffee.chen/workspace_stage/trans_yolov5_to_mlu_rk/project_detection_
 # 标定 camera_A
 python calibrate_camera.py \
   --camera_name camera_A \
-  --camera_image ../data/calibration/rtmart-001_frame0.jpg \
-  --plane_image ../data/calibration/floor_plan.png \
-  --output ../data/calibration/homography_A.json \
+  --camera_image data/calibration/rtmart-001_frame0.jpg \
+  --plane_image data/calibration/floor_plan.png \
+  --output data/calibration/homography_A.json \
   --show_preview
 
 # 标定 camera_B
 python calibrate_camera.py \
   --camera_name camera_B \
-  --camera_image ../data/calibration/rtmart-003_frame0.jpg \
-  --plane_image ../data/calibration/floor_plan.png \
-  --output ../data/calibration/homography_B.json \
+  --camera_image data/calibration/rtmart-003_frame0.jpg \
+  --plane_image data/calibration/floor_plan.png \
+  --output data/calibration/homography_B.json \
   --show_preview
 ```
 
@@ -695,15 +695,14 @@ python calibrate_camera.py \
 cd /Users/chaffee.chen/workspace_stage/trans_yolov5_to_mlu_rk/project_detection_and_heatmap
 
 python plane_heatmap.py \
-  --group "19:00:camera_A=../data/result/rtmart-002_bbox.txt,camera_B=../data/result/rtmart-004_bbox.txt" \
-  --group "20:00:camera_A=../data/result/rtmart-001_bbox.txt,camera_B=../data/result/rtmart-003_bbox.txt" \
-  --calib "camera_A=../data/calibration/homography_A.json,camera_B=../data/calibration/homography_B.json" \
-  --plane_image ../data/calibration/floor_plan.png \
+  --group "19:00:camera_A=data/result/rtmart-002_bbox_onnx.txt,camera_B=data/result/rtmart-004_bbox_onnx.txt" \
+  --group "20:00:camera_A=data/result/rtmart-001_bbox_onnx.txt,camera_B=data/result/rtmart-003_bbox_onnx.txt" \
+  --calib "camera_A=data/calibration/homography_A.json,camera_B=data/calibration/homography_B.json" \
+  --plane_image data/calibration/floor_plane.png \
   --plane_width 1920 --plane_height 1080 \
   --window_duration_seconds 300 \
   --delta --rate_of_change \
-  --roi_json ../data/calibration/roi_sample.json \
-  --output_dir ../data/result/
+  --output_dir data/result/
 ```
 
 > 产出文件:

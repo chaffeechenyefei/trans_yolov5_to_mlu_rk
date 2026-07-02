@@ -369,6 +369,7 @@ def plane_heatmap():
         print(f'  ✓ 输出: {output_path} (max={heat_max:.1f}s / 该像素点最多累计人·秒)')
 
     # --- 差值热力图 (Delta Heatmap) / Delta between two windows ---
+    delta_pair_done: Optional[Tuple[str, str]] = None
     if opt.delta and len(window_heat_grids) >= 2:
         labels = list(window_heat_grids.keys())
         # 取最后两个窗口做差值 (后 - 前) / Subtract the last two windows (later - earlier)
@@ -408,8 +409,10 @@ def plane_heatmap():
                                   f'plane_heatmap_delta_{label_a.replace(":", "_")}_{label_b.replace(":", "_")}.png')
         cv2.imwrite(delta_path, delta_color)
         print(f'  ✓ 差值图输出: {delta_path} (Δ范围: {-delta_abs_max:.1f}s ~ +{delta_abs_max:.1f}s)')
+        delta_pair_done = (label_a, label_b)
 
     # --- 变化率热力图 (可选) / Rate-of-change heatmap (optional) ---
+    roc_pair_done: Optional[Tuple[str, str]] = None
     if opt.rate_of_change and len(window_heat_grids) >= 2:
         labels = list(window_heat_grids.keys())
         label_a, label_b = labels[0], labels[1]
@@ -444,11 +447,29 @@ def plane_heatmap():
                                 f'plane_heatmap_roc_{label_a.replace(":", "_")}_{label_b.replace(":", "_")}.png')
         cv2.imwrite(roc_path, roc_color)
         print(f'  ✓ 变化率图输出: {roc_path} / Rate-of-change saved: {roc_path}')
+        roc_pair_done = (label_a, label_b)
 
-    # --- 区域统计 JSON 输出 + 注入 Dashboard / ROI statistics JSON output + inject into dashboard ---
+    # --- 区域统计 JSON 输出 (可选) / ROI statistics JSON output (optional) ---
+    # 只有 user 显式传 --roi_json 且有足够窗口才产出统计数据; 但 dashboard 无论如何都会
+    # (重新) 生成, 这样在没传 --roi_json 的场景下占位符也会被替换成 `[]`, 不会导致
+    # 浏览器 JS 崩溃 / 此次 dashboard 始终 (重新) 写出, 即使没有 ROI 统计也会用 `[]` 兜底.
     if opt.roi_json and os.path.isfile(opt.roi_json) and len(window_heat_grids) >= 2:
         _compute_roi_stats(opt.roi_json, window_heat_grids, opt.output_dir)
-        _inject_roi_into_dashboard(opt.output_dir)
+
+    # --- 始终 (重新) 生成 dashboard.html / Always (re)materialize dashboard.html ---
+    # 关键修复: 之前只有传 --roi_json 才会回写 dashboard, 占位符裸留为 JS 标识符,
+    # 触发 ReferenceError 让 init() 不执行 -> 所有 <img src> 永远为空串 -> 表现为
+    # "dashboard 打开后不加载同目录 PNG". 现在每次运行都重写.
+    # Critical fix: previously the dashboard was only touched when --roi_json was
+    # supplied, so without it the placeholder `__ROI_STATS_PLACEHOLDER__` lived in
+    # the page as a bare JS identifier -> ReferenceError -> init() never runs ->
+    # no <img src> is ever set -> "dashboard doesn't load sibling PNGs".
+    _materialize_dashboard(
+        opt.output_dir,
+        window_labels=list(window_heat_grids.keys()),
+        delta_pair=delta_pair_done,
+        roc_pair=roc_pair_done,
+    )
 
     print('\n全部完成 / Done.')
 
@@ -517,27 +538,385 @@ def _compute_roi_stats(roi_json_path: str, window_heat_grids: Dict[str, np.ndarr
         print(f'  ✓ ROI 统计 CSV: {csv_path}')
 
 
-def _inject_roi_into_dashboard(output_dir: str):
-    """将 roi_statistics.json 数据动态注入 dashboard.html, 避免 file:// 协议下 fetch CORS 限制.
-    Inject roi_statistics.json data into dashboard.html to bypass CORS under file:// protocol."""
-    stats_path = os.path.join(output_dir, 'roi_statistics.json')
+# Dashboard HTML 模板. 每次运行 plane_heatmap.py 时都会 (重新) 写出到 output_dir,
+# 占位符由 _materialize_dashboard 通过 .replace 填入, 不使用 str.format 以避免
+# 模板中 CSS/JS 的大括号冲突.
+# Dashboard HTML template. Re-emitted to output_dir on every run; placeholders are
+# filled in via .replace by _materialize_dashboard (NOT str.format, to avoid clashing
+# with the many { } braces in the CSS/JS body).
+_DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2D Plane Heatmap Dashboard | 平面热力图分析</title>
+<style>
+  :root {
+    --bg: #0f1119;
+    --panel-bg: #1a1d2e;
+    --border: #2a2d3e;
+    --text: #e0e0e0;
+    --text-secondary: #8890a4;
+    --accent: #4fc3f7;
+    --accent-warm: #ff8a65;
+    --accent-cold: #64b5f6;
+    --positive: #66bb6a;
+    --negative: #ef5350;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .header {
+    background: var(--panel-bg);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .header h1 {
+    font-size: 22px;
+    font-weight: 600;
+    background: linear-gradient(135deg, var(--accent), var(--accent-warm));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .header .badge {
+    font-size: 12px;
+    background: #2a2d3e;
+    border: 1px solid var(--border);
+    padding: 4px 12px;
+    border-radius: 12px;
+    color: var(--text-secondary);
+  }
+  .main {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 24px 32px;
+  }
+  .heatmap-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 24px;
+  }
+  .heatmap-card {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .heatmap-card.full-width {
+    grid-column: 1 / -1;
+  }
+  .card-header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .card-header .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .card-header .dot.warm { background: #ff8a65; }
+  .card-header .dot.cool { background: #64b5f6; }
+  .card-body { padding: 0; }
+  .card-body img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  .delta-section { margin-bottom: 24px; }
+  .stats-section {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+  .stats-section .card-header {
+    border-bottom: 1px solid var(--border);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th, td {
+    padding: 12px 20px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  th {
+    color: var(--text-secondary);
+    font-weight: 500;
+    background: rgba(255,255,255,0.02);
+  }
+  td { color: var(--text); }
+  .delta-positive { color: var(--positive); }
+  .delta-negative { color: var(--negative); }
+  .delta-neutral  { color: var(--text-secondary); }
+  @media (max-width: 900px) {
+    .heatmap-grid { grid-template-columns: 1fr; }
+    .main { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🔥 2D Plane Heatmap Dashboard | 平面热力图分析</h1>
+  <span class="badge" id="timestamp">--</span>
+</div>
+
+<div class="main">
+  <!-- 原始热力图对比 / Raw heatmap comparison -->
+  <div class="heatmap-grid" id="heatmapGrid">
+    <div class="heatmap-card">
+      <div class="card-header">
+        <span class="dot warm"></span>
+        <span id="labelA">窗口 A</span>
+        <span style="margin-left:auto;color:var(--text-secondary);font-size:12px">红色=高热区 / Red=Hot</span>
+      </div>
+      <div class="card-body">
+        <img id="imgA" src="" alt="热力图 A" onerror="this.parentElement.innerHTML='<div style=\'padding:40px;text-align:center;color:var(--text-secondary)\'>暂无数据 / No data</div>'">
+      </div>
+    </div>
+    <div class="heatmap-card">
+      <div class="card-header">
+        <span class="dot warm"></span>
+        <span id="labelB">窗口 B</span>
+        <span style="margin-left:auto;color:var(--text-secondary);font-size:12px">蓝色=低热区 / Blue=Cold</span>
+      </div>
+      <div class="card-body">
+        <img id="imgB" src="" alt="热力图 B" onerror="this.parentElement.innerHTML='<div style=\'padding:40px;text-align:center;color:var(--text-secondary)\'>暂无数据 / No data</div>'">
+      </div>
+    </div>
+  </div>
+
+  <!-- 差值热力图 / Delta heatmap -->
+  <div class="delta-section">
+    <div class="heatmap-card full-width">
+      <div class="card-header">
+        <span class="dot" style="background:linear-gradient(135deg,var(--accent-warm),var(--accent-cold))"></span>
+        <span>Δ 差值热力图 / Delta Heatmap</span>
+        <span style="margin-left:auto;color:var(--text-secondary);font-size:12px">
+          红色↑ = 人流增加 &nbsp; 蓝色↓ = 人流减少 / Red↑ = More traffic &nbsp; Blue↓ = Less traffic
+        </span>
+      </div>
+      <div class="card-body">
+        <img id="imgDelta" src="" alt="差值热力图" onerror="this.parentElement.innerHTML='<div style=\'padding:40px;text-align:center;color:var(--text-secondary)\'>暂无数据 / No data</div>'">
+      </div>
+    </div>
+  </div>
+
+  <!-- 变化率热力图 / Rate of Change -->
+  <div class="delta-section" id="rocSection" style="display:none">
+    <div class="heatmap-card full-width">
+      <div class="card-header">
+        <span class="dot" style="background:linear-gradient(135deg,var(--accent-warm),var(--accent-cold))"></span>
+        <span>% 变化率热力图 / Rate of Change</span>
+        <span style="margin-left:auto;color:var(--text-secondary);font-size:12px">
+          红色↑ = 增长 &nbsp; 蓝色↓ = 下降 / Red↑ = Growth &nbsp; Blue↓ = Decline
+        </span>
+      </div>
+      <div class="card-body">
+        <img id="imgRoc" src="" alt="变化率热力图" onerror="document.getElementById('rocSection').style.display='none'">
+      </div>
+    </div>
+  </div>
+
+  <!-- ROI 区域统计表 / ROI statistics table -->
+  <div class="stats-section" id="statsSection">
+    <div class="card-header">
+      <span class="dot" style="background:var(--accent)"></span>
+      <span>📊 区域统计对比 / Zone Statistics Comparison</span>
+      <span style="margin-left:auto;color:var(--text-secondary);font-size:12px">单位: 人·秒 (person-seconds)</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table id="statsTable">
+        <thead><tr><th>加载中... / Loading...</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// --- Dashboard 配置 / Configuration ---
+// windows / deltaImage / rocImage 由 plane_heatmap.py 注入, 与本次输出 PNG 一致.
+// windows / deltaImage / rocImage are injected by plane_heatmap.py and always match
+// the PNGs actually produced in this run.
+const CONFIG = {
+  windows: [
+__WINDOWS_JS__
+  ],
+  deltaImage: '__DELTA_IMAGE__',
+  rocImage: '__ROC_IMAGE__',
+  roiStatsJson: 'roi_statistics.json',
+  basePath: '',
+};
+
+// ROI 统计数据由 plane_heatmap.py 动态注入; 占位符永远是合法 JS 字面量 (默认空数组).
+// ROI stats injected by plane_heatmap.py; placeholder is always a valid JS literal.
+const EMBEDDED_ROI_STATS = __ROI_STATS_PLACEHOLDER__;
+
+function loadStats() {
+  renderStatsTable(EMBEDDED_ROI_STATS);
+}
+
+function renderStatsTable(data) {
+  const thead = document.querySelector('#statsTable thead');
+  const tbody = document.querySelector('#statsTable tbody');
+
+  if (!data || !data.length) {
+    thead.innerHTML = '<tr><th>区域/Zone</th><th colspan="4">暂无统计数据 / No statistics</th></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-secondary);padding:32px">'
+      + '运行 plane_heatmap.py 时使用 --roi_json 参数可生成区域统计 / Use --roi_json with plane_heatmap.py to generate zone statistics'
+      + '</td></tr>';
+    return;
+  }
+
+  const columns = Object.keys(data[0]);
+  thead.innerHTML = '<tr>' + columns.map(c => `<th>${c}</th>`).join('') + '</tr>';
+
+  tbody.innerHTML = data.map(row => {
+    const cells = columns.map(col => {
+      let val = row[col];
+      let cls = '';
+      if (col.startsWith('Δ') || col.startsWith('变化率')) {
+        if (typeof val === 'number') {
+          if (val > 0) cls = 'delta-positive';
+          else if (val < 0) cls = 'delta-negative';
+          val = (val > 0 ? '+' : '') + val.toLocaleString();
+        } else if (typeof val === 'string') {
+          if (val.startsWith('-')) cls = 'delta-negative';
+          else if (val !== '0') cls = 'delta-positive';
+        }
+      } else if (typeof val === 'number') {
+        val = val.toLocaleString();
+      }
+      return `<td class="${cls}">${val}</td>`;
+    }).join('');
+    return `<tr>${cells}</tr>`;
+  }).join('');
+}
+
+function init() {
+  document.getElementById('timestamp').textContent = new Date().toLocaleString('zh-CN');
+
+  const wins = CONFIG.windows || [];
+  if (wins.length >= 1) {
+    document.getElementById('labelA').textContent = '⏰ ' + wins[0].label;
+    document.getElementById('imgA').src = CONFIG.basePath + wins[0].filename;
+  }
+  if (wins.length >= 2) {
+    document.getElementById('labelB').textContent = '⏰ ' + wins[1].label;
+    document.getElementById('imgB').src = CONFIG.basePath + wins[1].filename;
+  }
+
+  // 仅当 CONFIG.deltaImage 非空才设 src, 否则直接隐藏卡片
+  // Only set src if deltaImage is non-empty, otherwise hide the card entirely
+  const deltaImg = document.getElementById('imgDelta');
+  const deltaSrc = CONFIG.basePath + CONFIG.deltaImage;
+  if (CONFIG.deltaImage) {
+    deltaImg.src = deltaSrc;
+  } else {
+    deltaImg.parentElement.parentElement.parentElement.style.display = 'none';
+  }
+
+  // 变化率图同理: 空文件名直接隐藏区块
+  // Rate-of-change: empty filename hides the section
+  const rocImg = document.getElementById('imgRoc');
+  if (CONFIG.rocImage) {
+    rocImg.src = CONFIG.basePath + CONFIG.rocImage;
+    rocImg.onload = function() {
+      document.getElementById('rocSection').style.display = 'block';
+    };
+    rocImg.onerror = function() {
+      document.getElementById('rocSection').style.display = 'none';
+    };
+  } else {
+    document.getElementById('rocSection').style.display = 'none';
+  }
+
+  loadStats();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
+"""
+
+
+def _materialize_dashboard(output_dir: str, window_labels: List[str],
+                           delta_pair: Optional[Tuple[str, str]] = None,
+                           roc_pair: Optional[Tuple[str, str]] = None):
+    """(重新)生成 dashboard.html, 保证 CONFIG 与本次产出的 PNG 一一对应,
+    并把 roi_statistics.json (若存在) 内联进 HTML, 否则填 `[]`.
+
+    关键修复: 以前只有当用户传 --roi_json 时才会替换模板里的
+    `__ROI_STATS_PLACEHOLDER__`, 否则浏览器加载到的 JS 是裸标识符
+    `const EMBEDDED_ROI_STATS = __ROI_STATS_PLACEHOLDER__;` 会触发 ReferenceError,
+    让整段脚本崩溃 -> init() 不执行 -> 所有 <img src> 永远是空串 -> 表现为
+    "dashboard 打开后不加载同目录 PNG". 现在每次运行都会回写完整 dashboard,
+    占位符要么替换成真实 JSON, 要么替换成 `[]`, 永不裸留.
+
+    (Re)generate dashboard.html so CONFIG always matches the PNGs we just wrote,
+    inline roi_statistics.json if present, otherwise fall back to []. This also
+    guarantees the __ROI_STATS_PLACEHOLDER__ token is never left as a bare JS
+    identifier (which previously killed the entire <script> block)."""
     dashboard_path = os.path.join(output_dir, 'dashboard.html')
+    stats_path = os.path.join(output_dir, 'roi_statistics.json')
 
-    if not os.path.isfile(stats_path) or not os.path.isfile(dashboard_path):
-        return
+    def _safe(label: str) -> str:
+        return label.replace(':', '_')
 
-    with open(stats_path, 'r', encoding='utf-8') as f:
-        stats_json_str = f.read().strip()
+    # 构造 CONFIG.windows 数组 / Build the CONFIG.windows array
+    windows_js = ',\n'.join(
+        f"    {{ label: {json.dumps(lbl)}, filename: 'plane_heatmap_{_safe(lbl)}.png' }}"
+        for lbl in window_labels
+    )
 
-    with open(dashboard_path, 'r', encoding='utf-8') as f:
-        html = f.read()
+    delta_filename = ''
+    if delta_pair is not None:
+        la, lb = delta_pair
+        delta_filename = f'plane_heatmap_delta_{_safe(la)}_{_safe(lb)}.png'
 
-    html = html.replace('__ROI_STATS_PLACEHOLDER__', stats_json_str)
+    roc_filename = ''
+    if roc_pair is not None:
+        ra, rb = roc_pair
+        roc_filename = f'plane_heatmap_roc_{_safe(ra)}_{_safe(rb)}.png'
+
+    # ROI 统计: 内联 JSON, 缺失则用空数组, 避免裸标识符导致 JS 崩溃
+    # Inline ROI stats JSON if present, otherwise use an empty array literal
+    if os.path.isfile(stats_path):
+        with open(stats_path, 'r', encoding='utf-8') as f:
+            roi_stats_payload = f.read().strip()
+    else:
+        roi_stats_payload = '[]'
+
+    html = (_DASHBOARD_TEMPLATE
+            .replace('__WINDOWS_JS__', windows_js)
+            .replace('__DELTA_IMAGE__', delta_filename)
+            .replace('__ROC_IMAGE__', roc_filename)
+            .replace('__ROI_STATS_PLACEHOLDER__', roi_stats_payload))
 
     with open(dashboard_path, 'w', encoding='utf-8') as f:
         f.write(html)
 
-    print(f'  ✓ Dashboard 已更新 ROI 统计数据: {dashboard_path} / Dashboard updated with ROI stats')
+    print(f'  ✓ Dashboard 已(重新)生成: {dashboard_path} / Dashboard (re)materialized')
 
 
 if __name__ == '__main__':

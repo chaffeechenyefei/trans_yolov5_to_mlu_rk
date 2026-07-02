@@ -208,10 +208,13 @@
 
 <script>
 // --- Dashboard 配置 / Configuration ---
+// windows / deltaImage / rocImage 由 plane_heatmap.py 注入, 与本次输出 PNG 一致.
+// windows / deltaImage / rocImage are injected by plane_heatmap.py and always match
+// the PNGs actually produced in this run.
 const CONFIG = {
   windows: [
-    { label: '19:00-19:05', filename: 'plane_heatmap_19_00.png' },
-    { label: '20:00-20:05', filename: 'plane_heatmap_20_00.png' },
+    { label: "19:00", filename: 'plane_heatmap_19_00.png' },
+    { label: "20:00", filename: 'plane_heatmap_20_00.png' }
   ],
   deltaImage: 'plane_heatmap_delta_19_00_20_00.png',
   rocImage: 'plane_heatmap_roc_19_00_20_00.png',
@@ -219,8 +222,9 @@ const CONFIG = {
   basePath: '',
 };
 
-// ROI 统计数据由 plane_heatmap.py 动态注入 / Injected dynamically by plane_heatmap.py
-const EMBEDDED_ROI_STATS = __ROI_STATS_PLACEHOLDER__;
+// ROI 统计数据由 plane_heatmap.py 动态注入; 占位符永远是合法 JS 字面量 (默认空数组).
+// ROI stats injected by plane_heatmap.py; placeholder is always a valid JS literal.
+const EMBEDDED_ROI_STATS = [];
 
 function loadStats() {
   renderStatsTable(EMBEDDED_ROI_STATS);
@@ -266,21 +270,40 @@ function renderStatsTable(data) {
 function init() {
   document.getElementById('timestamp').textContent = new Date().toLocaleString('zh-CN');
 
-  const [winA, winB] = CONFIG.windows;
-  document.getElementById('labelA').textContent = '⏰ ' + winA.label;
-  document.getElementById('labelB').textContent = '⏰ ' + winB.label;
-  document.getElementById('imgA').src = CONFIG.basePath + winA.filename;
-  document.getElementById('imgB').src = CONFIG.basePath + winB.filename;
-  document.getElementById('imgDelta').src = CONFIG.basePath + CONFIG.deltaImage;
+  const wins = CONFIG.windows || [];
+  if (wins.length >= 1) {
+    document.getElementById('labelA').textContent = '⏰ ' + wins[0].label;
+    document.getElementById('imgA').src = CONFIG.basePath + wins[0].filename;
+  }
+  if (wins.length >= 2) {
+    document.getElementById('labelB').textContent = '⏰ ' + wins[1].label;
+    document.getElementById('imgB').src = CONFIG.basePath + wins[1].filename;
+  }
 
+  // 仅当 CONFIG.deltaImage 非空才设 src, 否则直接隐藏卡片
+  // Only set src if deltaImage is non-empty, otherwise hide the card entirely
+  const deltaImg = document.getElementById('imgDelta');
+  const deltaSrc = CONFIG.basePath + CONFIG.deltaImage;
+  if (CONFIG.deltaImage) {
+    deltaImg.src = deltaSrc;
+  } else {
+    deltaImg.parentElement.parentElement.parentElement.style.display = 'none';
+  }
+
+  // 变化率图同理: 空文件名直接隐藏区块
+  // Rate-of-change: empty filename hides the section
   const rocImg = document.getElementById('imgRoc');
-  rocImg.src = CONFIG.basePath + CONFIG.rocImage;
-  rocImg.onload = function() {
-    document.getElementById('rocSection').style.display = 'block';
-  };
-  rocImg.onerror = function() {
+  if (CONFIG.rocImage) {
+    rocImg.src = CONFIG.basePath + CONFIG.rocImage;
+    rocImg.onload = function() {
+      document.getElementById('rocSection').style.display = 'block';
+    };
+    rocImg.onerror = function() {
+      document.getElementById('rocSection').style.display = 'none';
+    };
+  } else {
     document.getElementById('rocSection').style.display = 'none';
-  };
+  }
 
   loadStats();
 }
