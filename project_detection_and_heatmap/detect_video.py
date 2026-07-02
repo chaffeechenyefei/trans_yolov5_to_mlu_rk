@@ -24,7 +24,7 @@ Usage:
     python detect_video.py \
       --weights ../weights/yolov5s-people_mode0.onnx \
       --source ../data/videos/rtmart-001.mp4 \
-      --bbox_output --bbox_normalized --sample_fps 1
+      --bbox_output --bbox_normalized --sample_fps 25
 """
 
 import argparse

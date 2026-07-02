@@ -434,7 +434,7 @@ python detect_video.py \
   --conf_thres 0.5 \
   --iou_thres 0.3 \
   --device cpu \                            # 映射到 ONNX provider
-  --sample_fps 1 \
+  --sample_fps 25 \
   --bbox_output \
   --bbox_normalized
 ```
@@ -531,8 +531,274 @@ python onnx_export.py --weights ../weights/yolov5s-people.pt --img_size 736 416
 | `calibrate_camera.py` / `plane_heatmap.py` | 直接复制, 不修改 | 这两个脚本已经只依赖 OpenCV + NumPy, 天然独立 |
 | 权重文件位置 | 通过软链接或 `--weights` 参数引用 workspace 中的 `.onnx` 文件 | 避免复制大文件, 保持单一数据源 |
 
+### 3.4 端到端 CLI 命令速查 / End-to-End CLI Quick Reference
+
+以下是从检测 bbox → 合成视频验证 → 标定 → 热力图生成的完整命令链。
+
+> **说明**: 所有命令在 `project_detection_and_heatmap/` 目录下执行, 除非特别标注。
+> 假设权重文件 `../weights/yolov5s-people.pt` / `.onnx` 已存在。
+
+```mermaid
+flowchart LR
+    A[导出 PT→ONNX] --> B[bbox 检测]
+    B --> C[合成视频验证]
+    B --> D[平面热力图生成]
+    D --> E[Dashboard 查看]
+    F[相机标定] --> D
+```
 
 ---
+
+#### 3.4.1 前置: 导出 PT → ONNX / Prerequisite: Export PT to ONNX
+
+```shell
+# 在 workspace 根目录执行
+cd /Users/chaffee.chen/workspace_stage/trans_yolov5_to_mlu_rk
+python onnx_export.py --weights weights/yolov5s-people.pt --img_size 736 416 --mode 0
+# 产出: weights/yolov5s-people_mode0.onnx
+```
+
+#### 3.4.2 Step 1: bbox 检测 (4 个视频) / Step 1: BBox Detection (4 videos)
+
+对每个视频执行 ONNX 检测, 产出归一化 bbox 文件:
+
+```shell
+cd /Users/chaffee.chen/workspace_stage/trans_yolov5_to_mlu_rk/project_detection_and_heatmap
+
+# camera_A, 20:00 窗口 → rtmart-001_bbox.txt
+python detect_video.py \
+  --weights weights/yolov5s-people.onnx \
+  --source data/videos/rtmart-001.mp4 \
+  --save_dir data/result \
+  --img_size 736 416 \
+  --conf_thres 0.5 --iou_thres 0.3 \
+  --device cpu \
+  --sample_fps 25 \
+  --bbox_output --bbox_normalized
+
+# camera_A, 19:00 窗口 → rtmart-002_bbox.txt
+python detect_video.py \
+  --weights weights/yolov5s-people.onnx \
+  --source data/videos/rtmart-002.mp4 \
+  --save_dir data/result \
+  --img_size 736 416 \
+  --conf_thres 0.5 --iou_thres 0.3 \
+  --device cpu \
+  --sample_fps 25 \
+  --bbox_output --bbox_normalized
+
+# camera_B, 20:00 窗口 → rtmart-003_bbox.txt
+python detect_video.py \
+  --weights weights/yolov5s-people.onnx \
+  --source data/videos/rtmart-003.mp4 \
+  --save_dir data/result \
+  --img_size 736 416 \
+  --conf_thres 0.5 --iou_thres 0.3 \
+  --device cpu \
+  --sample_fps 25 \
+  --bbox_output --bbox_normalized
+
+# camera_B, 19:00 窗口 → rtmart-004_bbox.txt
+python detect_video.py \
+  --weights weights/yolov5s-people.onnx \
+  --source data/videos/rtmart-004.mp4 \
+  --save_dir data/result \
+  --img_size 736 416 \
+  --conf_thres 0.5 --iou_thres 0.3 \
+  --device cpu \
+  --sample_fps 25 \
+  --bbox_output --bbox_normalized
+```
+
+> 产出 4 个 bbox 文件: `data/result/rtmart-001_bbox.txt` ~ `rtmart-004_bbox.txt`
+
+#### 3.4.3 Step 2: 合成视频验证检测质量 / Step 2: Synthesize Video to Verify Detection
+
+用 bbox 文件合成带标注的视频, 目视检查检测效果:
+
+```shell
+cd /Users/chaffee.chen/workspace_stage/trans_yolov5_to_mlu_rk/project_detection_and_heatmap
+
+# 合成 rtmart-001 的检测结果视频
+python bbox_video_synth.py \
+  --source data/videos/rtmart-001.mp4 \
+  --bbox data/result/rtmart-001_bbox_onnx.txt \
+  --save_dir data/result \
+  --sample_fps 25 \
+  --bbox_normalized true \
+  --label cls_conf \
+  --show_frame_id
+
+# 合成 rtmart-002 的检测结果视频
+python bbox_video_synth.py \
+  --source data/videos/rtmart-002.mp4 \
+  --bbox data/result/rtmart-002_bbox_onnx.txt \
+  --save_dir data/result \
+  --sample_fps 25 \
+  --bbox_normalized true \
+  --label cls_conf \
+  --show_frame_id
+
+# 合成 rtmart-003 的检测结果视频
+python bbox_video_synth.py \
+  --source ../data/videos/rtmart-003.mp4 \
+  --bbox ../data/result/rtmart-003_bbox.txt \
+  --save_dir ../data/result \
+  --sample_fps 25 \
+  --bbox_normalized true \
+  --label cls_conf \
+  --show_frame_id
+
+# 合成 rtmart-004 的检测结果视频
+python bbox_video_synth.py \
+  --source ../data/videos/rtmart-004.mp4 \
+  --bbox ../data/result/rtmart-004_bbox.txt \
+  --save_dir ../data/result \
+  --sample_fps 25 \
+  --bbox_normalized true \
+  --label cls_conf \
+  --show_frame_id
+```
+
+> 产出 4 个标注视频: `data/result/rtmart-001_synth.mp4` ~ `rtmart-004_synth.mp4`。打开目视确认 bbox 覆盖完整、误检率可接受后再进入下一步。
+
+#### 3.4.4 Step 3: 相机标定 / Step 3: Camera Calibration (交互式 Interactive)
+
+> 如果 `data/calibration/homography_A.json` 和 `homography_B.json` 已存在则跳过。
+> 标定前需准备好 `data/calibration/floor_plan.png` (超市平面图)。
+
+```shell
+cd /Users/chaffee.chen/workspace_stage/trans_yolov5_to_mlu_rk/project_detection_and_heatmap
+
+# 标定 camera_A
+python calibrate_camera.py \
+  --camera_name camera_A \
+  --camera_image ../data/calibration/rtmart-001_frame0.jpg \
+  --plane_image ../data/calibration/floor_plan.png \
+  --output ../data/calibration/homography_A.json \
+  --show_preview
+
+# 标定 camera_B
+python calibrate_camera.py \
+  --camera_name camera_B \
+  --camera_image ../data/calibration/rtmart-003_frame0.jpg \
+  --plane_image ../data/calibration/floor_plan.png \
+  --output ../data/calibration/homography_B.json \
+  --show_preview
+```
+
+> **交互操作**: 左右键分别在 camera 画面和平面图上依次点击 **N≥4 组** 对应点 (如地砖角、货架角)。按 `Space` 计算 Homography。按 `r` 撤销上一个点。按 `ESC` 或 `q` 退出。
+
+#### 3.4.5 Step 4: 生成平面热力图 + 差值 + 变化率 + ROI 统计 / Step 4: Generate Heatmaps + Delta + Rate of Change + ROI Stats
+
+```shell
+cd /Users/chaffee.chen/workspace_stage/trans_yolov5_to_mlu_rk/project_detection_and_heatmap
+
+python plane_heatmap.py \
+  --group "19:00:camera_A=../data/result/rtmart-002_bbox.txt,camera_B=../data/result/rtmart-004_bbox.txt" \
+  --group "20:00:camera_A=../data/result/rtmart-001_bbox.txt,camera_B=../data/result/rtmart-003_bbox.txt" \
+  --calib "camera_A=../data/calibration/homography_A.json,camera_B=../data/calibration/homography_B.json" \
+  --plane_image ../data/calibration/floor_plan.png \
+  --plane_width 1920 --plane_height 1080 \
+  --window_duration_seconds 300 \
+  --delta --rate_of_change \
+  --roi_json ../data/calibration/roi_sample.json \
+  --output_dir ../data/result/
+```
+
+> 产出文件:
+> - `data/result/plane_heatmap_1900.png` — 19:00 窗口热力图
+> - `data/result/plane_heatmap_2000.png` — 20:00 窗口热力图
+> - `data/result/plane_heatmap_delta_1900_2000.png` — 差值热力图 (20:00 − 19:00)
+> - `data/result/plane_heatmap_rate_1900_2000.png` — 变化率热力图
+> - `data/result/dashboard.html` 中 ROI 统计表自动填充 (含 `__ROI_STATS_PLACEHOLDER__` 注入)
+
+#### 3.4.6 Step 5: 查看 Dashboard / Step 5: View Dashboard
+
+```shell
+open /Users/chaffee.chen/workspace_stage/trans_yolov5_to_mlu_rk/data/result/dashboard.html
+```
+
+> 浏览器打开 dashboard, 可查看: 两张原始热力图左右对比 + 差值热力图 + 变化率热力图 + 各 ROI 区域的统计对比表。
+
+---
+
+#### 3.4.7 完整一键脚本 / One-shot Shell Script
+
+如需一次执行所有步骤 (跳过标定和导出, 若文件已存在):
+
+```shell
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="/Users/chaffee.chen/workspace_stage/trans_yolov5_to_mlu_rk"
+PROJ="$ROOT/project_detection_and_heatmap"
+WEIGHTS="$ROOT/weights/yolov5s-people_mode0.onnx"
+CALIB_A="$ROOT/data/calibration/homography_A.json"
+CALIB_B="$ROOT/data/calibration/homography_B.json"
+FLOOR_PLAN="$ROOT/data/calibration/floor_plan.png"
+ROI_JSON="$ROOT/data/calibration/roi_sample.json"
+OUTDIR="$ROOT/data/result"
+
+echo "=== Step 1: bbox detection ==="
+for video in rtmart-001 rtmart-002 rtmart-003 rtmart-004; do
+  bbox="$OUTDIR/${video}_bbox.txt"
+  if [ ! -f "$bbox" ]; then
+    echo "  Detecting $video ..."
+    python "$PROJ/detect_video.py" \
+      --weights "$WEIGHTS" \
+      --source "$ROOT/data/videos/${video}.mp4" \
+      --save_dir "$OUTDIR" \
+      --img_size 736 416 --conf_thres 0.5 --iou_thres 0.3 \
+      --device cpu --sample_fps 25 \
+      --bbox_output --bbox_normalized
+  else
+    echo "  $bbox exists, skip"
+  fi
+done
+
+echo "=== Step 2: synth video (skip if synth already exists) ==="
+for video in rtmart-001 rtmart-002 rtmart-003 rtmart-004; do
+  synth="$OUTDIR/${video}_synth.mp4"
+  if [ ! -f "$synth" ]; then
+    echo "  Synthesizing $video ..."
+    python "$PROJ/bbox_video_synth.py" \
+      --source "$ROOT/data/videos/${video}.mp4" \
+      --bbox "$OUTDIR/${video}_bbox.txt" \
+      --save_dir "$OUTDIR" \
+      --sample_fps 25 --bbox_normalized yes --label cls_conf
+  else
+    echo "  $synth exists, skip"
+  fi
+done
+
+echo "=== Step 3: calibration (skip if already exists) ==="
+if [ ! -f "$CALIB_A" ]; then
+  echo "  Please run calibration for camera_A interactively:"
+  echo "  python $PROJ/calibrate_camera.py ..."
+  echo "  Skipping auto calibration (interactive tool)."
+fi
+
+echo "=== Step 4: plane heatmap ==="
+python "$PROJ/plane_heatmap.py" \
+  --group "19:00:camera_A=$OUTDIR/rtmart-002_bbox.txt,camera_B=$OUTDIR/rtmart-004_bbox.txt" \
+  --group "20:00:camera_A=$OUTDIR/rtmart-001_bbox.txt,camera_B=$OUTDIR/rtmart-003_bbox.txt" \
+  --calib "camera_A=$CALIB_A,camera_B=$CALIB_B" \
+  --plane_image "$FLOOR_PLAN" \
+  --plane_width 1920 --plane_height 1080 \
+  --window_duration_seconds 300 \
+  --delta --rate_of_change \
+  --roi_json "$ROI_JSON" \
+  --output_dir "$OUTDIR"
+
+echo "=== Step 5: open dashboard ==="
+open "$OUTDIR/dashboard.html"
+echo "=== All done ==="
+```
+
+---
+
+
 # CLI
 
 ## 导出 PT → ONNX (在 workspace 根目录执行 / Run in workspace root)
