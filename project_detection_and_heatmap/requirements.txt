@@ -1,0 +1,16 @@
+# project_detection_and_heatmap 依赖 / Dependencies
+# 说明: 这是一个独立项目, 不依赖 PyTorch
+# Note: This is a standalone project with zero PyTorch dependency
+
+# 核心依赖 / Core dependencies
+opencv-python>=4.5.0
+numpy>=1.20.0
+onnxruntime>=1.10.0
+
+# 仅 onnx_export.py 需要 (一次性导出脚本)
+# PyTorch dependencies for ONNX export only (one-time script)
+# torch>=1.10.0
+# onnx>=1.12.0
+
+# 用于测试的额外依赖 / Additional test dependencies
+# PyTorch is only needed for test_pt_vs_onnx.py comparison tests

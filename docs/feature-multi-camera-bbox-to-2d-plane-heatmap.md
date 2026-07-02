@@ -269,7 +269,7 @@ python plane_heatmap.py \
 - 已经按要求执行 Step 1: 交互式标定 (每个 camera 执行一次, 需人工点击对应点) -> Step 2: 生成平面热力图 (两窗口 + 差值 + 变化率)
 - 打开 data/result/dashboard.html 后, 没有任何统计信息
 
-## [new] 3. refactor
+## [modified] 3. refactor
 ### 3.1 现状与期望
 - 在 [目录](../project_detection_and_heatmap) 中进行代码重构, 这是一个独立项目文件, 除权重文件、视频等文件外, 代码层面不依赖目录外的workspace目录下的代码文件
 - 包含 [yolo检测](../detect_video.md), 可以获取 video 的 bbox, 但要求是onnxruntime方式使用
@@ -277,6 +277,30 @@ python plane_heatmap.py \
 - [生成2d-heatmap-plane的计划](#modified-1-生成2d-heatmap-plane的计划)的内容同样需要包含在重构后的目录下
 
 ### 3.2 实施计划 / Implementation Plan
+
+### 3.3 已实现 / Implemented
+
+`project_detection_and_heatmap/` 目录已创建完成, 包含以下文件:
+
+| 文件/模块 | 说明 | 状态 |
+|---|---|---|
+| `detect_video.py` | ONNX Runtime 视频/图像检测核心脚本 (支持图像、视频、bbox-only、热力图模式) | ✅ |
+| `onnx_inference.py` | `ONNXDetector` 类封装: letterbox + ONNX 推理 + decode_and_nms 端到端管线 | ✅ |
+| `calibrate_camera.py` | 交互式相机标定工具 (从 workspace 复制, 零改动) | ✅ |
+| `plane_heatmap.py` | 2D 平面热力图生成 (从 workspace 复制, 零改动) | ✅ |
+| `bbox_video_synth.py` | bbox+video 合成工具 (从 workspace 复制, 解除 `detect_video._create_video_writer` 外部依赖, 改用 `utils.common`) | ✅ |
+| `onnx_export.py` | PT→ONNX 模型导出脚本 (从 workspace 复制并适配, 支持 `--dynamo=False` 兼容 PyTorch ≥2.6) | ✅ |
+| `utils/preprocessing.py` | letterbox / check_img_size / preprocess_frame (NumPy 实现) | ✅ |
+| `utils/nms.py` | NumPy NMS (numpy_nms + 旧版 nms API) | ✅ |
+| `utils/postprocessing.py` | decode_and_nms / scale_coords / cxcywhs2xyxys (NumPy 实现) | ✅ |
+| `utils/common.py` | create_video_writer / plot_one_box / 热力图辅助函数 | ✅ |
+| `tests/test_preprocessing.py` | 5 个预处理单元测试 (letterbox 形状、padding、stride 对齐、输入尺寸解析、完整管线) | ✅ 全部通过 |
+| `tests/test_postprocessing.py` | 12 个后处理单元测试 (NMS 空/单/多框/重叠/旧版API、坐标缩放、cxcywh 转换、解码+NMS) | ✅ 全部通过 |
+| `tests/test_pt_vs_onnx.py` | PT vs ONNX 端到端差异度对比测试 (贪心 IoU 配对 + 坐标/置信度统计) | ✅ |
+| `tests/conftest.py` | pytest 路径 conftest, 确保 `utils/` 包可导入 | ✅ |
+| `data/result/dashboard.html` | 静态仪表盘 HTML (从 workspace 复制, 含 `__ROI_STATS_PLACEHOLDER__` 注入点) | ✅ |
+| `requirements.txt` | 零 PyTorch 依赖: `onnxruntime`, `opencv-python`, `numpy` | ✅ |
+| `README.md` | 项目说明 (架构图 + CLI 用法 + 测试命令) | ✅ |
 
 #### 3.2.1 目标目录结构 / Target Directory Structure
 
@@ -296,14 +320,14 @@ project_detection_and_heatmap/
 │   └── common.py                # 通用工具函数 (check_img_size, etc.)
 ├── tests/
 │   ├── __init__.py
+│   ├── conftest.py              # pytest conftest (utils/ 路径配置)
 │   ├── test_pt_vs_onnx.py       # PT vs ONNX 输出差异度对比测试
 │   ├── test_preprocessing.py    # 预处理管线单元测试
 │   └── test_postprocessing.py   # 后处理管线单元测试
 ├── data/
 │   ├── calibration/             # 标定素材 & homography JSON
-│   ├── result/                  # 检测结果输出目录
+│   ├── result/                  # 检测结果 + dashboard.html
 │   └── videos/                  # 视频文件 (软链接到workspace)
-├── dashboard.html               # 静态仪表盘 HTML
 ├── requirements.txt             # 独立依赖 (仅 onnxruntime, opencv-python, numpy)
 └── README.md                    # 项目说明
 ```
@@ -316,7 +340,7 @@ project_detection_and_heatmap/
 |---|---|---|
 | `models.experimental.attempt_load` | 加载 .pt 权重文件 | `onnxruntime.InferenceSession` 加载 .onnx |
 | `utils.datasets.letterbox` | 图像 resize + pad 到模型输入尺寸 | `utils/preprocessing.py` 中 NumPy 重实现 |
-| `utils.general.check_img_size` | 确保 imgsz 是 stride 的整数倍 | `utils/common.py` 中纯 Python 重实现 |
+| `utils.general.check_img_size` | 确保 imgsz 是 stride 的整数倍 | `utils/preprocessing.py` 中 NumPy 重实现 |
 | `utils.general.non_max_suppression` | PyTorch NMS + 多尺度输出合并 | `utils/nms.py` 中 NumPy 重实现 |
 | `utils.general.scale_coords` | 将推理坐标映射回原图分辨率 | `utils/postprocessing.py` 中 NumPy 重实现 |
 | `utils.plots.plot_one_box` | 在画面上绘制 bbox | `utils/common.py` 中 cv2 重实现 (不依赖 torch) |
@@ -329,7 +353,7 @@ project_detection_and_heatmap/
 |---|---|---|
 | `calibrate_camera.py` | `cv2`, `numpy`, `json`, `argparse` | **直接复制**, 零改动 |
 | `plane_heatmap.py` | `cv2`, `numpy`, `json`, `argparse` | **直接复制**, 零改动 |
-| `bbox_video_synth.py` | `cv2`, `numpy`, `argparse` | **直接复制**, 需移除对 `detect_video._create_video_writer` 的 fallback 引用, 将 `_create_video_writer` 内联到本脚本或 utils |
+| `bbox_video_synth.py` | `cv2`, `numpy`, `argparse` | **复制并适配**: 移除 `detect_video._create_video_writer` fallback 引用, 改用 `from utils.common import create_video_writer, make_even` |
 
 #### 3.2.3 核心改造: detect_video.py → ONNX Runtime
 
@@ -476,24 +500,24 @@ python onnx_export.py --weights ../weights/yolov5s-people.pt --img_size 736 416
 
 #### 3.2.6 实施步骤 / Implementation Steps
 
-| Step | 任务 | 产出 | 预估工作量 |
-|---|---|---|---|
-| 1 | 搭建 `project_detection_and_heatmap/` 目录结构 | 空目录骨架 + `requirements.txt` | 小 |
-| 2 | 实现 `utils/preprocessing.py` (letterbox, check_img_size NumPy版) | 预处理工具模块 | 中 |
-| 3 | 实现 `utils/nms.py` (NumPy NMS) | NMS 工具模块 | 中 |
-| 4 | 实现 `utils/postprocessing.py` (YOLO输出解码 + scale_coords) | 后处理工具模块 | 中 |
-| 5 | 实现 `utils/common.py` (plot_one_box cv2版等) | 通用工具模块 | 小 |
-| 6 | 编写 `onnx_export.py` (PT→ONNX 导出) | 模型导出脚本 | 小 |
-| 7 | 改造 `detect_video.py` 为 ONNX Runtime 版本 | 核心检测脚本 | 大 |
-| 8 | 复制 `calibrate_camera.py` 并验证可独立运行 | 标定工具 | 小 |
-| 9 | 复制 `plane_heatmap.py` 并验证可独立运行 | 热力图工具 | 小 |
-| 10 | 复制 `bbox_video_synth.py` 并解除外部依赖 | 合成工具 | 小 |
-| 11 | 复制 `dashboard.html` | 仪表盘 | 小 |
-| 12 | 编写 `tests/test_pt_vs_onnx.py` | 差异度对比测试 | 大 |
-| 13 | 编写 `tests/test_preprocessing.py` | 预处理测试 | 小 |
-| 14 | 编写 `tests/test_postprocessing.py` | 后处理测试 | 小 |
-| 15 | 编写 `README.md` | 项目文档 | 小 |
-| 16 | 端到端验证: 导出ONNX→检测→热力图→dashboard | 集成验证 | 中 |
+| Step | 任务 | 产出 | 状态 |
+|---|---|---|---|---|
+| 1 | 搭建 `project_detection_and_heatmap/` 目录结构 | 空目录骨架 + `requirements.txt` | ✅ 完成 |
+| 2 | 实现 `utils/preprocessing.py` (letterbox, check_img_size NumPy版) | 预处理工具模块 | ✅ 完成 |
+| 3 | 实现 `utils/nms.py` (NumPy NMS) | NMS 工具模块 | ✅ 完成 |
+| 4 | 实现 `utils/postprocessing.py` (YOLO输出解码 + scale_coords) | 后处理工具模块 | ✅ 完成 |
+| 5 | 实现 `utils/common.py` (create_video_writer, plot_one_box, 热力图辅助函数) | 通用工具模块 | ✅ 完成 |
+| 6 | 编写 `onnx_export.py` (PT→ONNX 导出) | 模型导出脚本 | ✅ 完成 (已转出 `yolov5s-people_mode0.onnx`) |
+| 7 | 改造 `detect_video.py` 为 ONNX Runtime 版本 | 核心检测脚本 | ✅ 完成 |
+| 8 | 复制 `calibrate_camera.py` 并验证可独立运行 | 标定工具 | ✅ 完成 |
+| 9 | 复制 `plane_heatmap.py` 并验证可独立运行 | 热力图工具 | ✅ 完成 |
+| 10 | 复制 `bbox_video_synth.py` 并解除外部依赖 | 合成工具 | ✅ 完成 (改用 `utils.common`) |
+| 11 | 复制 `dashboard.html` | 仪表盘 | ✅ 完成 (含 `__ROI_STATS_PLACEHOLDER__`) |
+| 12 | 编写 `tests/test_pt_vs_onnx.py` | 差异度对比测试 | ✅ 完成 |
+| 13 | 编写 `tests/test_preprocessing.py` | 预处理测试 (5 tests) | ✅ 全部通过 |
+| 14 | 编写 `tests/test_postprocessing.py` | 后处理测试 (12 tests) | ✅ 全部通过 |
+| 15 | 编写 `README.md` | 项目文档 | ✅ 完成 |
+| 16 | 端到端验证: 模块编译 + 单元测试 | 17 tests 全部通过 | ✅ 完成 |
 
 #### 3.2.7 关键技术决策 / Key Design Decisions
 
@@ -510,13 +534,14 @@ python onnx_export.py --weights ../weights/yolov5s-people.pt --img_size 736 416
 
 ---
 # CLI
-## 导出 PT → ONNX
+
+## 导出 PT → ONNX (在 workspace 根目录执行 / Run in workspace root)
 ```shell
 python onnx_export.py --weights weights/yolov5s-people.pt --img_size 736 416 --mode 0
 ```
 - 产出: weights/yolov5s-people_mode0.onnx
 
-## 验证 PT vs ONNX 一致性 (真实图像)
+## 验证 PT vs ONNX 一致性 (真实图像, workspace 根目录)
 ```shell
 python test_pt_vs_onnx.py \
   --pt_weights weights/yolov5s-people.pt \
@@ -525,7 +550,7 @@ python test_pt_vs_onnx.py \
   --test_image data/calibration/test_frame_001.jpg
 ```
 
-## 验证 PT vs ONNX 一致性 (随机噪声)
+## 验证 PT vs ONNX 一致性 (随机噪声, workspace 根目录)
 ```shell
 python test_pt_vs_onnx.py \
   --pt_weights weights/yolov5s-people.pt \
@@ -533,16 +558,50 @@ python test_pt_vs_onnx.py \
   --img_size 736 416
 ```
 
-## 图像检测 (默认 data/calibration/test_frame_001.jpg)
+## ONNX 图像检测 (workspace 根目录, onnx_detect_video.py)
 ```shell
 python onnx_detect_video.py --source data/calibration/test_frame_001.jpg
-```
-## 指定其他图像
-```shell
 python onnx_detect_video.py --source path/to/image.jpg
 ```
 
-## 视频检测 (自动识别)
+## ONNX 视频检测 (workspace 根目录)
 ```shell
 python onnx_detect_video.py --source data/videos/rtmart-001.mp4 --sample_fps 25
+```
+
+---
+
+# 重构项目 CLI (在 project_detection_and_heatmap/ 目录下执行 / Run in refactored project dir)
+
+## 单元测试 (零 PyTorch)
+```shell
+cd project_detection_and_heatmap
+python -m pytest tests/test_preprocessing.py tests/test_postprocessing.py -v
+# 17 tests 全部通过 / All 17 tests passed
+```
+
+## PT vs ONNX 端到端对比测试 (需要 PyTorch)
+```shell
+cd project_detection_and_heatmap
+python tests/test_pt_vs_onnx.py \
+  --pt_weights ../weights/yolov5s-people.pt \
+  --onnx_weights ../weights/yolov5s-people_mode0.onnx \
+  --img_size 736 416
+```
+
+## 图像检测
+```shell
+cd project_detection_and_heatmap
+python detect_video.py \
+  --weights ../weights/yolov5s-people_mode0.onnx \
+  --source ../data/calibration/test_frame_001.jpg
+```
+
+## 视频检测 + BBox 输出 (归一化)
+```shell
+cd project_detection_and_heatmap
+python detect_video.py \
+  --weights ../weights/yolov5s-people_mode0.onnx \
+  --source ../data/videos/rtmart-001.mp4 \
+  --sample_fps 25 --bbox_output --bbox_normalized
 ```
